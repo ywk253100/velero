@@ -123,6 +123,15 @@ func installVeleroServer(io *cliinstall.InstallOptions) error {
 		fmt.Printf("%v \n", err)
 	}
 
+	fmt.Printf("######################################\n")
+	cmd = exec.Command("kubectl", "logs", "deploy/velero", "-n", "velero")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil{
+		fmt.Printf("%v \n", err)
+	}
+	
+
 	fmt.Println("Waiting for Velero deployment to be ready.")
 	if _, err = install.DeploymentIsReady(client.dynamicFactory, io.Namespace); err != nil {
 		return errors.Wrap(err, errorMsg)
