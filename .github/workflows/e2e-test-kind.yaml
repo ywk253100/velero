@@ -33,5 +33,7 @@ jobs:
           docker ps || true
           kubectl get node -o wide || true
           kubectl describe nodes kind-control-plane || true
-          docker exec -it kind-control-plane journalctl -u kubectl || true
+          echo "==========="
+          docker exec -i kind-control-plane journalctl -u kubectl || true
+          echo "================="
           docker logs kind-control-plane || true
