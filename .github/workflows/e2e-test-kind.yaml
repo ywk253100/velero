@@ -32,4 +32,5 @@ jobs:
         run: |
           docker ps || true
           kubectl get node -o wide || true
+          kubectl describe nodes kind-control-plane || true
           docker logs kind-control-plane || true
