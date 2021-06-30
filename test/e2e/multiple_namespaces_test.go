@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -66,7 +68,13 @@ var _ = Describe("[Scale] Backup/restore of 2500 namespaces", func() {
 		if installVelero {
 			Expect(veleroInstall(context.Background(), veleroImage, veleroNamespace, cloudProvider, objectStoreProvider, false,
 				cloudCredentialsFile, bslBucket, bslPrefix, bslConfig, vslConfig, "")).To(Succeed())
-
+			fmt.Printf("######################################\n")
+			cmd := exec.Command("kubectl", "get", "deployment", "velero", "-n", "velero", "-o", "yaml")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil{
+				fmt.Printf("%v \n", err)
+			}
 		}
 	})
 

@@ -99,7 +99,7 @@ jobs:
             ${{ runner.os }}-go-
       - name: Run E2E test
         run: |
-          docker exec -it kind-control-plane crictl images
+          docker exec -i kind-control-plane crictl images || true
           cat << EOF > /tmp/credential
           [default]
           aws_access_key_id=minio
