@@ -27,6 +27,7 @@ jobs:
     steps:
       - uses: engineerd/setup-kind@v0.5.0
         with:
+          version: "v0.11.1"
           image: "kindest/node:v${{ matrix.k8s }}"
       - name: Run E2E test
         run: |
