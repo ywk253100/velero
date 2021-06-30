@@ -123,17 +123,25 @@ func installVeleroServer(io *cliinstall.InstallOptions) error {
 		fmt.Printf("%v \n", err)
 	}
 
-	fmt.Printf("######################################\n")
-	cmd = exec.Command("kubectl", "logs", "deploy/velero", "-n", "velero")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil{
-		fmt.Printf("%v \n", err)
-	}
-	
+
+
 
 	fmt.Println("Waiting for Velero deployment to be ready.")
 	if _, err = install.DeploymentIsReady(client.dynamicFactory, io.Namespace); err != nil {
+		fmt.Printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n")
+		cmd2 := exec.Command("bash", "-c", `kubectl -n velero describe pod $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n velero | grep velero)`)
+		cmd2.Stdout = os.Stdout
+		cmd2.Stderr = os.Stderr
+		if err := cmd2.Run(); err != nil{
+			fmt.Printf("%v \n", err)
+		}
+		fmt.Printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n")
+		cmd3 := exec.Command("kubectl", "logs", "deploy/velero", "-n", "velero")
+		cmd3.Stdout = os.Stdout
+		cmd3.Stderr = os.Stderr
+		if err := cmd3.Run(); err != nil{
+			fmt.Printf("%v \n", err)
+		}
 		return errors.Wrap(err, errorMsg)
 	}
 
