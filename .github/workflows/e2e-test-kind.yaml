@@ -48,6 +48,7 @@ jobs:
         run: |
           IMAGE=velero VERSION=pr-test make container
           docker save velero:pr-test -o ./velero.tar
+          docker images
   # Run E2E test against all kubernetes versions on kind
   run-e2e-test:
     needs: build
@@ -98,6 +99,7 @@ jobs:
             ${{ runner.os }}-go-
       - name: Run E2E test
         run: |
+          docker exec -it kind-control-plane crictl images
           cat << EOF > /tmp/credential
           [default]
           aws_access_key_id=minio
