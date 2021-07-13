@@ -23,9 +23,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
 )
@@ -52,7 +51,7 @@ func installKibishii(ctx context.Context, namespace string, cloudPlatform string
 	}
 
 	fmt.Printf("Waiting for kibishii jump-pad pod to be ready\n")
-	jumpPadWaitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=ready", "-n", namespace, "pod/jump-pad")
+	jumpPadWaitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=ready", "-n", namespace, "--timeout=10m", "pod/jump-pad")
 	_, stderr, err = veleroexec.RunCommand(jumpPadWaitCmd)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to wait for ready status of pod %s/%s, stderr=%s", namespace, jumpPadPod, stderr)
@@ -68,9 +67,9 @@ func generateData(ctx context.Context, namespace string, levels int, filesPerLev
 		strconv.Itoa(blockSize), strconv.Itoa(passNum), strconv.Itoa(expectedNodes))
 	fmt.Printf("kibishiiGenerateCmd cmd =%v\n", kibishiiGenerateCmd)
 
-	_, stderr, err := veleroexec.RunCommand(kibishiiGenerateCmd)
+	stdout, stderr, err := veleroexec.RunCommand(kibishiiGenerateCmd)
 	if err != nil {
-		return errors.Wrapf(err, "failed to generate, stderr=%s", stderr)
+		return errors.Wrapf(err, "failed to generate, stderr=%s, stdout=%s", stderr, stdout)
 	}
 
 	return nil
@@ -92,17 +91,27 @@ func verifyData(ctx context.Context, namespace string, levels int, filesPerLevel
 
 // runKibishiiTests runs kibishii tests on the provider.
 func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespace, backupName, restoreName, backupLocation string,
-	useVolumeSnapshots bool) error {
-	fiveMinTimeout, _ := context.WithTimeout(context.Background(), 5*time.Minute)
+	useVolumeSnapshots bool, registryCredentialFile string) error {
 	oneHourTimeout, _ := context.WithTimeout(context.Background(), time.Minute*60)
 	timeout := 10 * time.Minute
-	interval := 5 * time.Second
+	serviceAccountName := "default"
 
-	if err := createNamespace(fiveMinTimeout, client, kibishiiNamespace); err != nil {
+	if err := createNamespace(oneHourTimeout, client, kibishiiNamespace); err != nil {
 		return errors.Wrapf(err, "Failed to create namespace %s to install Kibishii workload", kibishiiNamespace)
 	}
+	defer func() {
+		if err := deleteNamespace(oneHourTimeout, client, kibishiiNamespace, true, timeout); err != nil {
+			logrus.Errorf(errors.Wrapf(err, "failed to delete the namespace %s", kibishiiNamespace).Error())
+		}
+	}()
+	if err := waitUntilServiceAccountCreated(oneHourTimeout, client, kibishiiNamespace, serviceAccountName, timeout); err != nil {
+		return errors.Wrapf(err, "failed to wait the service account %q created under the namespace %q", serviceAccountName, kibishiiNamespace)
+	}
+	if err := patchServiceAccountWithImagePullSecret(oneHourTimeout, client, kibishiiNamespace, serviceAccountName, registryCredentialFile); err != nil {
+		return errors.Wrapf(err, "failed to patch the service account %q under the namespace %q", serviceAccountName, kibishiiNamespace)
+	}
 
-	if err := installKibishii(fiveMinTimeout, kibishiiNamespace, providerName); err != nil {
+	if err := installKibishii(oneHourTimeout, kibishiiNamespace, providerName); err != nil {
 		return errors.Wrap(err, "Failed to install Kibishii workload")
 	}
 
@@ -118,7 +127,7 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 	}
 
 	if err := veleroBackupNamespace(oneHourTimeout, veleroCLI, veleroNamespace, backupName, kibishiiNamespace, backupLocation, useVolumeSnapshots); err != nil {
-		veleroBackupLogs(fiveMinTimeout, veleroCLI, veleroNamespace, backupName)
+		veleroBackupLogs(oneHourTimeout, veleroCLI, veleroNamespace, backupName)
 		return errors.Wrapf(err, "Failed to backup kibishii namespace %s", kibishiiNamespace)
 	}
 
@@ -131,17 +140,12 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 		}
 	}
 	fmt.Printf("Simulating a disaster by removing namespace %s\n", kibishiiNamespace)
-	if err := client.clientGo.CoreV1().Namespaces().Delete(oneHourTimeout, kibishiiNamespace, metav1.DeleteOptions{}); err != nil {
-		return errors.Wrap(err, "Failed to simulate a disaster")
-	}
-	// wait for ns delete
-	err := waitForNamespaceDeletion(interval, timeout, client, kibishiiNamespace)
-	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to wait for deletion of namespace %s", kibishiiNamespace))
+	if err := deleteNamespace(oneHourTimeout, client, kibishiiNamespace, true, timeout); err != nil {
+		return errors.Wrapf(err, "failed to delete namespace %s", kibishiiNamespace)
 	}
 
 	if err := veleroRestore(oneHourTimeout, veleroCLI, veleroNamespace, restoreName, backupName); err != nil {
-		veleroRestoreLogs(fiveMinTimeout, veleroCLI, veleroNamespace, restoreName)
+		veleroRestoreLogs(oneHourTimeout, veleroCLI, veleroNamespace, restoreName)
 		return errors.Wrapf(err, "Restore %s failed from backup %s", restoreName, backupName)
 	}
 
@@ -158,13 +162,6 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 		return errors.Wrap(err, "Failed to verify data generated by kibishii")
 	}
 
-	if err := client.clientGo.CoreV1().Namespaces().Delete(oneHourTimeout, kibishiiNamespace, metav1.DeleteOptions{}); err != nil {
-		return errors.Wrapf(err, "Failed to cleanup %s workload namespace", kibishiiNamespace)
-	}
-	// wait for ns delete
-	if err = waitForNamespaceDeletion(interval, timeout, client, kibishiiNamespace); err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to wait for deletion of namespace %s", kibishiiNamespace))
-	}
 	fmt.Printf("kibishii test completed successfully\n")
 	return nil
 }
