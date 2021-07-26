@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	appv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -96,7 +101,7 @@ func getProviderVeleroInstallOptions(
 }
 
 // installVeleroServer installs velero in the cluster.
-func installVeleroServer(io *cliinstall.InstallOptions) error {
+func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile string) error {
 	vo, err := io.AsVeleroOptions()
 	if err != nil {
 		return errors.Wrap(err, "Failed to translate InstallOptions to VeleroOptions for Velero")
@@ -109,6 +114,9 @@ func installVeleroServer(io *cliinstall.InstallOptions) error {
 
 	errorMsg := "\n\nError installing Velero. Use `kubectl logs deploy/velero -n velero` to check the deploy logs"
 	resources := install.AllResources(vo)
+	if err = patchResources(io.Namespace, registryCredentialFile, resources); err != nil {
+		return err
+	}
 	err = install.Install(client.dynamicFactory, resources, os.Stdout)
 	if err != nil {
 		return errors.Wrap(err, errorMsg)
@@ -129,6 +137,112 @@ func installVeleroServer(io *cliinstall.InstallOptions) error {
 	fmt.Printf("Velero is installed and ready to be tested in the %s namespace! ⛵ \n", io.Namespace)
 
 	return nil
+}
+
+// patch the velero resources for E2E testing
+//  1. change image pull policy as "Always"
+//  2. apply the image pull secret
+func patchResources(namespace, registryCredentialFile string, resources *unstructured.UnstructuredList) error {
+	var imagePullSecret *corev1.Secret
+	if len(registryCredentialFile) != 0 {
+		credential, err := ioutil.ReadFile(registryCredentialFile)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read the registry credential file %s", registryCredentialFile)
+		}
+		imagePullSecret = &corev1.Secret{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Secret",
+				APIVersion: corev1.SchemeGroupVersion.String(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "image-pull-secret",
+				Namespace: namespace,
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{
+				".dockerconfigjson": credential,
+			},
+		}
+
+		un, err := toUnstructured(imagePullSecret)
+		if err != nil {
+			return errors.Wrapf(err, "failed to convert pull secret to unstructure")
+		}
+		resources.Items = append(resources.Items, un)
+	}
+
+	for resourceIndex, resource := range resources.Items {
+		// patch the service account to add the image pull policy
+		if imagePullSecret != nil && resource.GetKind() == "ServiceAccount" && resource.GetName() == "velero" {
+			resource.Object["imagePullSecrets"] = []map[string]interface{}{
+				{
+					"name": "image-pull-secret",
+				},
+			}
+			resources.Items[resourceIndex] = resource
+			fmt.Printf("image pull secret %q set for velero serviceaccount \n", "image-pull-secret")
+			continue
+		}
+		// patch the resources to always pull images
+		if resource.GetKind() == "Deployment" && resource.GetName() == "velero" {
+			deployment := &appv1.Deployment{}
+			if err := toKubernetesResource(resource, deployment); err != nil {
+				return errors.Wrapf(err, "failed to convert to deployment")
+			}
+			for initContainerIndex := 0; initContainerIndex < len(deployment.Spec.Template.Spec.InitContainers); initContainerIndex++ {
+				deployment.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
+			}
+			for containerIndex := 0; containerIndex < len(deployment.Spec.Template.Spec.Containers); containerIndex++ {
+				deployment.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
+			}
+			un, err := toUnstructured(deployment)
+			if err != nil {
+				return errors.Wrapf(err, "failed to convert deployment to unstructure")
+			}
+			resources.Items[resourceIndex] = un
+			fmt.Printf("image pull policy changed to %q for velero deployment \n", corev1.PullAlways)
+			continue
+		}
+
+		if resource.GetKind() == "DaemonSet" && resource.GetName() == "restic" {
+			daemonSet := &appv1.DaemonSet{}
+			if err := toKubernetesResource(resource, daemonSet); err != nil {
+				return errors.Wrapf(err, "failed to convert to deployment")
+			}
+			for initContainerIndex := 0; initContainerIndex < len(daemonSet.Spec.Template.Spec.InitContainers); initContainerIndex++ {
+				daemonSet.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
+			}
+			for containerIndex := 0; containerIndex < len(daemonSet.Spec.Template.Spec.Containers); containerIndex++ {
+				daemonSet.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
+			}
+			un, err := toUnstructured(daemonSet)
+			if err != nil {
+				return errors.Wrapf(err, "failed to daemonset to unstructure")
+			}
+			resources.Items[resourceIndex] = un
+			fmt.Printf("image pull policy changed to %q for restic daemonset \n", corev1.PullAlways)
+		}
+	}
+
+	return nil
+}
+
+func toKubernetesResource(un unstructured.Unstructured, res interface{}) error {
+	data, err := json.Marshal(un.Object)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, res)
+}
+
+func toUnstructured(res interface{}) (unstructured.Unstructured, error) {
+	un := unstructured.Unstructured{}
+	data, err := json.Marshal(res)
+	if err != nil {
+		return un, err
+	}
+	err = json.Unmarshal(data, &un)
+	return un, err
 }
 
 // checkBackupPhase uses veleroCLI to inspect the phase of a Velero backup.
@@ -286,7 +400,7 @@ func veleroRestore(ctx context.Context, veleroCLI string, veleroNamespace string
 
 func veleroInstall(ctx context.Context, veleroImage string, veleroNamespace string, cloudProvider string, objectStoreProvider string, useVolumeSnapshots bool,
 	cloudCredentialsFile string, bslBucket string, bslPrefix string, bslConfig string, vslConfig string,
-	crdsVersion string, features string) error {
+	crdsVersion string, features string, registryCredentialFile string) error {
 
 	if cloudProvider != "kind" {
 		if objectStoreProvider != "" {
@@ -333,7 +447,7 @@ func veleroInstall(ctx context.Context, veleroImage string, veleroNamespace stri
 	veleroInstallOptions.CRDsVersion = crdsVersion
 	veleroInstallOptions.Namespace = veleroNamespace
 
-	err = installVeleroServer(veleroInstallOptions)
+	err = installVeleroServer(veleroInstallOptions, registryCredentialFile)
 	if err != nil {
 		return errors.WithMessagef(err, "Failed to install Velero in the cluster")
 	}
