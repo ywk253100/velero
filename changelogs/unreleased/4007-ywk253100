@@ -1,0 +1,1 @@
+Wait for the namespace to be deleted before removing the CRDs during uninstall. This removes the `--wait` flag of the `uninstall` command
