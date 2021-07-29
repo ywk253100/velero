@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -171,59 +170,60 @@ func patchResources(namespace, registryCredentialFile string, resources *unstruc
 		resources.Items = append(resources.Items, un)
 	}
 
-	for resourceIndex, resource := range resources.Items {
-		// patch the service account to add the image pull policy
-		if imagePullSecret != nil && resource.GetKind() == "ServiceAccount" && resource.GetName() == "velero" {
-			resource.Object["imagePullSecrets"] = []map[string]interface{}{
-				{
-					"name": "image-pull-secret",
-				},
+	/*
+		for resourceIndex, resource := range resources.Items {
+			// patch the service account to add the image pull policy
+			if imagePullSecret != nil && resource.GetKind() == "ServiceAccount" && resource.GetName() == "velero" {
+				resource.Object["imagePullSecrets"] = []map[string]interface{}{
+					{
+						"name": "image-pull-secret",
+					},
+				}
+				resources.Items[resourceIndex] = resource
+				fmt.Printf("image pull secret %q set for velero serviceaccount \n", "image-pull-secret")
+				continue
 			}
-			resources.Items[resourceIndex] = resource
-			fmt.Printf("image pull secret %q set for velero serviceaccount \n", "image-pull-secret")
-			continue
-		}
-		// patch the resources to always pull images
-		if resource.GetKind() == "Deployment" && resource.GetName() == "velero" {
-			deployment := &appv1.Deployment{}
-			if err := toKubernetesResource(resource, deployment); err != nil {
-				return errors.Wrapf(err, "failed to convert to deployment")
+			// patch the resources to always pull images
+			if resource.GetKind() == "Deployment" && resource.GetName() == "velero" {
+				deployment := &appv1.Deployment{}
+				if err := toKubernetesResource(resource, deployment); err != nil {
+					return errors.Wrapf(err, "failed to convert to deployment")
+				}
+				for initContainerIndex := 0; initContainerIndex < len(deployment.Spec.Template.Spec.InitContainers); initContainerIndex++ {
+					deployment.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
+				}
+				for containerIndex := 0; containerIndex < len(deployment.Spec.Template.Spec.Containers); containerIndex++ {
+					deployment.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
+				}
+				un, err := toUnstructured(deployment)
+				if err != nil {
+					return errors.Wrapf(err, "failed to convert deployment to unstructure")
+				}
+				resources.Items[resourceIndex] = un
+				fmt.Printf("image pull policy changed to %q for velero deployment \n", corev1.PullAlways)
+				continue
 			}
-			for initContainerIndex := 0; initContainerIndex < len(deployment.Spec.Template.Spec.InitContainers); initContainerIndex++ {
-				deployment.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
-			}
-			for containerIndex := 0; containerIndex < len(deployment.Spec.Template.Spec.Containers); containerIndex++ {
-				deployment.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
-			}
-			un, err := toUnstructured(deployment)
-			if err != nil {
-				return errors.Wrapf(err, "failed to convert deployment to unstructure")
-			}
-			resources.Items[resourceIndex] = un
-			fmt.Printf("image pull policy changed to %q for velero deployment \n", corev1.PullAlways)
-			continue
-		}
 
-		if resource.GetKind() == "DaemonSet" && resource.GetName() == "restic" {
-			daemonSet := &appv1.DaemonSet{}
-			if err := toKubernetesResource(resource, daemonSet); err != nil {
-				return errors.Wrapf(err, "failed to convert to deployment")
+			if resource.GetKind() == "DaemonSet" && resource.GetName() == "restic" {
+				daemonSet := &appv1.DaemonSet{}
+				if err := toKubernetesResource(resource, daemonSet); err != nil {
+					return errors.Wrapf(err, "failed to convert to deployment")
+				}
+				for initContainerIndex := 0; initContainerIndex < len(daemonSet.Spec.Template.Spec.InitContainers); initContainerIndex++ {
+					daemonSet.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
+				}
+				for containerIndex := 0; containerIndex < len(daemonSet.Spec.Template.Spec.Containers); containerIndex++ {
+					daemonSet.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
+				}
+				un, err := toUnstructured(daemonSet)
+				if err != nil {
+					return errors.Wrapf(err, "failed to daemonset to unstructure")
+				}
+				resources.Items[resourceIndex] = un
+				fmt.Printf("image pull policy changed to %q for restic daemonset \n", corev1.PullAlways)
 			}
-			for initContainerIndex := 0; initContainerIndex < len(daemonSet.Spec.Template.Spec.InitContainers); initContainerIndex++ {
-				daemonSet.Spec.Template.Spec.InitContainers[initContainerIndex].ImagePullPolicy = corev1.PullAlways
-			}
-			for containerIndex := 0; containerIndex < len(daemonSet.Spec.Template.Spec.Containers); containerIndex++ {
-				daemonSet.Spec.Template.Spec.Containers[containerIndex].ImagePullPolicy = corev1.PullAlways
-			}
-			un, err := toUnstructured(daemonSet)
-			if err != nil {
-				return errors.Wrapf(err, "failed to daemonset to unstructure")
-			}
-			resources.Items[resourceIndex] = un
-			fmt.Printf("image pull policy changed to %q for restic daemonset \n", corev1.PullAlways)
 		}
-	}
-
+	*/
 	return nil
 }
 
