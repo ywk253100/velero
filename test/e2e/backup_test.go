@@ -48,7 +48,9 @@ func backup_restore_test(useVolumeSnapshots bool) {
 
 	client, err := newTestClient()
 	fmt.Printf("=======================err: %v \n", err)
-	Expect(err).To(Succeed(), "Failed to instantiate cluster client for backup tests")
+	ass := Expect(err)
+	fmt.Printf("===================ass: %v \n", ass)
+	ass.To(Succeed(), "Failed to instantiate cluster client for backup tests")
 
 	BeforeEach(func() {
 		if useVolumeSnapshots && cloudProvider == "kind" {
