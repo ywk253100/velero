@@ -34,9 +34,9 @@ var _ = Describe("[Basic] Backup/restore of 2 namespaces", func() {
 
 	AfterEach(func() {
 		if installVelero {
-			timeoutCTX, _ := context.WithTimeout(context.Background(), time.Minute)
-			err := veleroUninstall(timeoutCTX, client.kubebuilder, installVelero, veleroNamespace)
-			Expect(err).To(Succeed())
+			//timeoutCTX, _ := context.WithTimeout(context.Background(), time.Minute)
+			//err := veleroUninstall(timeoutCTX, client.kubebuilder, installVelero, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 
 	})
