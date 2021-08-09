@@ -136,7 +136,8 @@ func RunMultipleNamespaceTest(ctx context.Context, client testClient, nsBaseName
 		}
 	}
 	// Cleanup is automatic on the way out
-	return nil
+
+	return fmt.Errorf("error")
 }
 
 func cleanupNamespaces(ctx context.Context, client testClient, nsBaseName string) error {
