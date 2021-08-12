@@ -34,8 +34,8 @@ var _ = Describe("[Basic] Backup/restore of 2 namespaces", func() {
 
 	AfterEach(func() {
 		if installVelero {
-			err := veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err := veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 
 	})
