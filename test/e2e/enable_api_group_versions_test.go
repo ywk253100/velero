@@ -59,6 +59,7 @@ var _ = Describe("[APIGroup] Velero tests with various CRD API group versions", 
 			err = veleroInstall(
 				context.Background(),
 				veleroImage,
+				resticHelperImage,
 				veleroNamespace,
 				cloudProvider,
 				objectStoreProvider,
