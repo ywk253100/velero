@@ -100,7 +100,7 @@ func getProviderVeleroInstallOptions(
 }
 
 // installVeleroServer installs velero in the cluster.
-func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile string) error {
+func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile, resticHelperImage string) error {
 	vo, err := io.AsVeleroOptions()
 	if err != nil {
 		return errors.Wrap(err, "Failed to translate InstallOptions to VeleroOptions for Velero")
@@ -114,9 +114,10 @@ func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile s
 	errorMsg := "\n\nError installing Velero. Use `kubectl logs deploy/velero -n velero` to check the deploy logs"
 	resources := install.AllResources(vo)
 
-	// apply the image pull secret to avoid the image pull limit of Docker Hub
-	if len(registryCredentialFile) > 0 {
-		if err = patchResources(io.Namespace, registryCredentialFile, resources); err != nil {
+	// 1. apply the image pull secret to avoid the image pull limit of Docker Hub
+	// 2. customize the restic restore helper image
+	if len(registryCredentialFile) > 0 || len(resticHelperImage) > 0 {
+		if err = patchResources(io.Namespace, registryCredentialFile, resticHelperImage, resources); err != nil {
 			return err
 		}
 	}
@@ -127,7 +128,14 @@ func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile s
 	}
 
 	fmt.Println("Waiting for Velero deployment to be ready.")
-	if _, err = install.DeploymentIsReady(client.dynamicFactory, io.Namespace); err != nil {
+	// install.DeploymentIsReady() timeout after 3 minutes, but the velero deployment cannot be ready within 3 minutes in some cases
+	// retry more times here to avoid this issue
+	for i := 0; i < 5; i++ {
+		if _, err = install.DeploymentIsReady(client.dynamicFactory, io.Namespace); err == nil || err != wait.ErrWaitTimeout {
+			break
+		}
+	}
+	if err != nil {
 		return errors.Wrap(err, errorMsg)
 	}
 
@@ -144,45 +152,76 @@ func installVeleroServer(io *cliinstall.InstallOptions, registryCredentialFile s
 }
 
 // patch the velero resources for E2E testing
-func patchResources(namespace, registryCredentialFile string, resources *unstructured.UnstructuredList) error {
-	credential, err := ioutil.ReadFile(registryCredentialFile)
-	if err != nil {
-		return errors.Wrapf(err, "failed to read the registry credential file %s", registryCredentialFile)
-	}
-
-	imagePullSecret := corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Secret",
-			APIVersion: corev1.SchemeGroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "image-pull-secret",
-			Namespace: namespace,
-		},
-		Type: corev1.SecretTypeDockerConfigJson,
-		Data: map[string][]byte{
-			".dockerconfigjson": credential,
-		},
-	}
-
-	for resourceIndex, resource := range resources.Items {
-		if resource.GetKind() == "ServiceAccount" && resource.GetName() == "velero" {
-			resource.Object["imagePullSecrets"] = []map[string]interface{}{
-				{
-					"name": "image-pull-secret",
-				},
-			}
-			resources.Items[resourceIndex] = resource
-			fmt.Printf("image pull secret %q set for velero serviceaccount \n", "image-pull-secret")
-			continue
+func patchResources(namespace, registryCredentialFile, resticHelperImage string, resources *unstructured.UnstructuredList) error {
+	// apply the image pull secret to avoid the image pull limit of Docker Hub
+	if len(registryCredentialFile) > 0 {
+		credential, err := ioutil.ReadFile(registryCredentialFile)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read the registry credential file %s", registryCredentialFile)
 		}
+
+		imagePullSecret := corev1.Secret{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Secret",
+				APIVersion: corev1.SchemeGroupVersion.String(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "image-pull-secret",
+				Namespace: namespace,
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{
+				".dockerconfigjson": credential,
+			},
+		}
+
+		for resourceIndex, resource := range resources.Items {
+			if resource.GetKind() == "ServiceAccount" && resource.GetName() == "velero" {
+				resource.Object["imagePullSecrets"] = []map[string]interface{}{
+					{
+						"name": "image-pull-secret",
+					},
+				}
+				resources.Items[resourceIndex] = resource
+				fmt.Printf("image pull secret %q set for velero serviceaccount \n", "image-pull-secret")
+				break
+			}
+		}
+
+		un, err := toUnstructured(imagePullSecret)
+		if err != nil {
+			return errors.Wrapf(err, "failed to convert pull secret to unstructure")
+		}
+		resources.Items = append(resources.Items, un)
 	}
 
-	un, err := toUnstructured(imagePullSecret)
-	if err != nil {
-		return errors.Wrapf(err, "failed to convert pull secret to unstructure")
+	// customize the restic restore helper image
+	if len(resticHelperImage) > 0 {
+		restoreActionConfig := corev1.ConfigMap{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "ConfigMap",
+				APIVersion: corev1.SchemeGroupVersion.String(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "restic-restore-action-config",
+				Namespace: namespace,
+				Labels: map[string]string{
+					"velero.io/plugin-config": "",
+					"velero.io/restic":        "RestoreItemAction",
+				},
+			},
+			Data: map[string]string{
+				"image": resticHelperImage,
+			},
+		}
+
+		un, err := toUnstructured(restoreActionConfig)
+		if err != nil {
+			return errors.Wrapf(err, "failed to convert restore action config to unstructure")
+		}
+		resources.Items = append(resources.Items, un)
+		fmt.Printf("the restic restore helper image is set by the configmap %q \n", "restic-restore-action-config")
 	}
-	resources.Items = append(resources.Items, un)
 
 	return nil
 }
@@ -350,7 +389,7 @@ func veleroRestore(ctx context.Context, veleroCLI string, veleroNamespace string
 	return checkRestorePhase(ctx, veleroCLI, veleroNamespace, restoreName, velerov1api.RestorePhaseCompleted)
 }
 
-func veleroInstall(ctx context.Context, veleroImage string, veleroNamespace string, cloudProvider string, objectStoreProvider string, useVolumeSnapshots bool,
+func veleroInstall(ctx context.Context, veleroImage, resticHelperImage string, veleroNamespace string, cloudProvider string, objectStoreProvider string, useVolumeSnapshots bool,
 	cloudCredentialsFile string, bslBucket string, bslPrefix string, bslConfig string, vslConfig string,
 	crdsVersion string, features string, registryCredentialFile string) error {
 
@@ -399,7 +438,7 @@ func veleroInstall(ctx context.Context, veleroImage string, veleroNamespace stri
 	veleroInstallOptions.CRDsVersion = crdsVersion
 	veleroInstallOptions.Namespace = veleroNamespace
 
-	err = installVeleroServer(veleroInstallOptions, registryCredentialFile)
+	err = installVeleroServer(veleroInstallOptions, registryCredentialFile, resticHelperImage)
 	if err != nil {
 		return errors.WithMessagef(err, "Failed to install Velero in the cluster")
 	}
