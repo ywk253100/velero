@@ -30,9 +30,9 @@ var (
 )
 
 // Test backup and restore of Kibishi using restic
-var _ = Describe("[Restic] Velero tests on cluster using the plugin provider for object storage and Restic for volume backups", backup_restore_with_restic)
+//var _ = Describe("[Restic] Velero tests on cluster using the plugin provider for object storage and Restic for volume backups", backup_restore_with_restic)
 
-var _ = Describe("[Snapshot] Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups", backup_restore_with_snapshots)
+//var _ = Describe("[Snapshot] Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups", backup_restore_with_snapshots)
 
 func backup_restore_with_snapshots() {
 	backup_restore_test(true)
@@ -66,8 +66,8 @@ func backup_restore_test(useVolumeSnapshots bool) {
 
 	AfterEach(func() {
 		if installVelero {
-			err = veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err = veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 	})
 

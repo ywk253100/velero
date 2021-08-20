@@ -254,14 +254,14 @@ func runEnableAPIGroupVersionsTests(ctx context.Context, client testClient, reso
 			return errors.Wrapf(err, "back up %s namespaces on source cluster", namespacesStr)
 		}
 
-		if err := deleteCRD(ctx, tc.srcCrdYaml); err != nil {
-			return errors.Wrapf(err, "delete music-system CRD from source cluster")
-		}
-
 		for _, ns := range tc.namespaces {
 			if err := deleteNamespace(ctx, client, ns, true); err != nil {
 				return errors.Wrapf(err, "delete %s namespace from source cluster", ns)
 			}
+		}
+
+		if err := deleteCRD(ctx, tc.srcCrdYaml); err != nil {
+			return errors.Wrapf(err, "delete music-system CRD from source cluster")
 		}
 
 		// Install music-system CRD for target cluster.

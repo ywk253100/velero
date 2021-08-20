@@ -17,8 +17,8 @@ import (
 )
 
 var _ = Describe("[Basic] Backup/restore of 2 namespaces", func() {
-
 	client, err := newTestClient()
+	
 	Expect(err).To(Succeed(), "Failed to instantiate cluster client for multiple namespace tests")
 
 	BeforeEach(func() {
@@ -51,6 +51,7 @@ var _ = Describe("[Basic] Backup/restore of 2 namespaces", func() {
 	})
 })
 
+/*
 var _ = Describe("[Scale] Backup/restore of 2500 namespaces", func() {
 
 	client, err := newTestClient()
@@ -69,8 +70,8 @@ var _ = Describe("[Scale] Backup/restore of 2500 namespaces", func() {
 
 	AfterEach(func() {
 		if installVelero {
-			err := veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err := veleroUninstall(context.Background(), client.kubebuilder, installVelero, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 
 	})
@@ -85,7 +86,7 @@ var _ = Describe("[Scale] Backup/restore of 2500 namespaces", func() {
 		})
 	})
 })
-
+*/
 func RunMultipleNamespaceTest(ctx context.Context, client testClient, nsBaseName string, numberOfNamespaces int, backupName string, restoreName string) error {
 	defer cleanupNamespaces(context.Background(), client, nsBaseName) // Run at exit for final cleanup
 	var excludeNamespaces []string
