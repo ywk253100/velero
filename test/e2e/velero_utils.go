@@ -22,9 +22,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -391,5 +394,76 @@ func waitForVSphereUploadCompletion(ctx context.Context, timeout time.Duration, 
 		return complete, nil
 	})
 
+	return err
+}
+
+func getVeleroVersion(ctx context.Context, veleroCLI string) (string, error) {
+	cmd := exec.CommandContext(ctx, veleroCLI, "version")
+	fmt.Println("Get Version Command:" + cmd.String())
+	stdout, stderr, err := veleroexec.RunCommand(cmd)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to get velero version, stdout=%s, stderr=%s", stdout, stderr)
+	}
+
+	output := strings.Replace(stdout, "\n", " ", -1)
+	fmt.Println("Version:" + output)
+	regCompiler := regexp.MustCompile(`(?i)client\s*:\s*version\s*:\s*(\S+).+server\s*:\s*version\s*:\s*(\S+)`)
+	versionMatches := regCompiler.FindStringSubmatch(output)
+	if len(versionMatches) < 3 {
+		return "", errors.New("Velero version command returned null version")
+	}
+	if versionMatches[1] != versionMatches[2] {
+		return "", errors.New("Velero server and client version are not matched")
+	}
+	return versionMatches[1], nil
+}
+
+func checkVeleroVersion(ctx context.Context, veleroCLI string, expectedVer string) error {
+	tag := expectedVer
+	tagInstalled, err := getVeleroVersion(ctx, veleroCLI)
+	if err != nil {
+		return errors.WithMessagef(err, "Failed to get Velero version")
+	}
+	if strings.Trim(tag, " ") != strings.Trim(tagInstalled, " ") {
+		return errors.New(fmt.Sprintf("Velero version %s is not as expected %s", tagInstalled, tag))
+	}
+	fmt.Printf("Velero version %s is as expected %s\n", tagInstalled, tag)
+	return nil
+}
+
+func installVeleroCLI(version string) (string, error) {
+	name := "velero-" + version + "-" + runtime.GOOS + "-" + runtime.GOARCH
+	postfix := ".tar.gz"
+	tarball := name + postfix
+	cliTarballUrl := "https://github.com/vmware-tanzu/velero/releases/download/" + version + "/" + tarball
+
+	if err := getVeleroCliTarball(tarball, cliTarballUrl); err != nil {
+		return "", errors.WithMessagef(err, "Failed to get Velero CLI tarball")
+	}
+
+	cmd := exec.Command("tar", "-xvf", tarball, "-C", ".")
+	if _, err := cmd.Output(); err != nil {
+		return "", errors.WithMessagef(err, "Failed to extract file from velero CLI tarball")
+	}
+	return "./" + name + "/velero", nil
+}
+
+func getVeleroCliTarball(tarball string, cliTarballUrl string) error {
+	resp, err := http.Get(cliTarballUrl)
+	if err != nil {
+		return errors.WithMessagef(err, "Failed to access Velero CLI tarball")
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(tarball)
+	if err != nil {
+		return errors.WithMessagef(err, "Failed to create file for Velero CLI %s downloaded from url %s.", tarball, cliTarballUrl)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return errors.WithMessagef(err, "Failed to write file for Velero CLI %s downloaded from url %s.", tarball, cliTarballUrl)
+	}
 	return err
 }
