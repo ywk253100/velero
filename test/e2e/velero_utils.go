@@ -458,6 +458,8 @@ func veleroBackupLogs(ctx context.Context, veleroCLI string, veleroNamespace str
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("============================================backup logs:\n")
 	logCmd := exec.CommandContext(ctx, veleroCLI, "--namespace", veleroNamespace, "backup", "logs", backupName)
 	logCmd.Stdout = os.Stdout
 	logCmd.Stderr = os.Stderr
@@ -465,7 +467,12 @@ func veleroBackupLogs(ctx context.Context, veleroCLI string, veleroNamespace str
 	if err != nil {
 		return err
 	}
-	return nil
+
+	fmt.Printf("============================================velero logs:\n")
+	veleroLogCmd := exec.CommandContext(ctx, "kubectl", "logs", "deployment/velero", "-n", veleroNamespace)
+	veleroLogCmd.Stdout = os.Stdout
+	veleroLogCmd.Stderr = os.Stderr
+	return veleroLogCmd.Run()
 }
 
 func veleroRestoreLogs(ctx context.Context, veleroCLI string, veleroNamespace string, restoreName string) error {
@@ -476,6 +483,8 @@ func veleroRestoreLogs(ctx context.Context, veleroCLI string, veleroNamespace st
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("============================================restore logs:\n")
 	logCmd := exec.CommandContext(ctx, veleroCLI, "--namespace", veleroNamespace, "restore", "logs", restoreName)
 	logCmd.Stdout = os.Stdout
 	logCmd.Stderr = os.Stderr
@@ -483,7 +492,12 @@ func veleroRestoreLogs(ctx context.Context, veleroCLI string, veleroNamespace st
 	if err != nil {
 		return err
 	}
-	return nil
+
+	fmt.Printf("============================================velero logs:\n")
+	veleroLogCmd := exec.CommandContext(ctx, "kubectl", "logs", "deployment/velero", "-n", veleroNamespace)
+	veleroLogCmd.Stdout = os.Stdout
+	veleroLogCmd.Stderr = os.Stderr
+	return veleroLogCmd.Run()
 }
 
 func veleroCreateBackupLocation(ctx context.Context,
