@@ -456,7 +456,7 @@ func veleroBackupLogs(ctx context.Context, veleroCLI string, veleroNamespace str
 	describeCmd.Stderr = os.Stderr
 	err := describeCmd.Run()
 	if err != nil {
-		return err
+		fmt.Printf("failed to describe the backup %s: %v", backupName, err)
 	}
 
 	fmt.Printf("============================================backup logs:\n")
@@ -465,7 +465,7 @@ func veleroBackupLogs(ctx context.Context, veleroCLI string, veleroNamespace str
 	logCmd.Stderr = os.Stderr
 	err = logCmd.Run()
 	if err != nil {
-		return err
+		fmt.Printf("failed to get logs of backup %s: %v", backupName, err)
 	}
 
 	fmt.Printf("============================================velero logs:\n")
@@ -481,7 +481,7 @@ func veleroRestoreLogs(ctx context.Context, veleroCLI string, veleroNamespace st
 	describeCmd.Stderr = os.Stderr
 	err := describeCmd.Run()
 	if err != nil {
-		return err
+		fmt.Printf("failed to describe the restore %s: %v", restoreName, err)
 	}
 
 	fmt.Printf("============================================restore logs:\n")
@@ -490,7 +490,7 @@ func veleroRestoreLogs(ctx context.Context, veleroCLI string, veleroNamespace st
 	logCmd.Stderr = os.Stderr
 	err = logCmd.Run()
 	if err != nil {
-		return err
+		fmt.Printf("failed to get logs of restore %s: %v", restoreName, err)
 	}
 
 	fmt.Printf("============================================velero logs:\n")
