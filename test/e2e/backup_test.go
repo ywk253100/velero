@@ -66,8 +66,8 @@ func backup_restore_test(useVolumeSnapshots bool) {
 
 	AfterEach(func() {
 		if installVelero {
-			err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 	})
 
