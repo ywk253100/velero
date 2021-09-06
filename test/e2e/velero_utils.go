@@ -398,7 +398,7 @@ func waitForVSphereUploadCompletion(ctx context.Context, timeout time.Duration, 
 }
 
 func getVeleroVersion(ctx context.Context, veleroCLI string) (string, error) {
-	cmd := exec.CommandContext(ctx, veleroCLI, "version")
+	cmd := exec.CommandContext(ctx, veleroCLI, "version", "--timeout", "60s")
 	fmt.Println("Get Version Command:" + cmd.String())
 	stdout, stderr, err := veleroexec.RunCommand(cmd)
 	if err != nil {
