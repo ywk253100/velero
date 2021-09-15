@@ -18,6 +18,7 @@ package e2e
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -38,19 +39,25 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 	useVolumeSnapshots bool, registryCredentialFile string) error {
 	oneHourTimeout, _ := context.WithTimeout(context.Background(), time.Minute*60)
 
-	if err := createNamespace(oneHourTimeout, client, kibishiiNamespace); err != nil {
+	var err error
+	if err = createNamespace(oneHourTimeout, client, kibishiiNamespace); err != nil {
 		return errors.Wrapf(err, "Failed to create namespace %s to install Kibishii workload", kibishiiNamespace)
 	}
 	defer func() {
-		if err := deleteNamespace(context.Background(), client, kibishiiNamespace, true); err != nil {
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+			return
+		}
+		if err = deleteNamespace(context.Background(), client, kibishiiNamespace, true); err != nil {
 			fmt.Println(errors.Wrapf(err, "failed to delete the namespace %q", kibishiiNamespace))
 		}
 	}()
-	if err := kibishiiPrepareBeforeBackup(oneHourTimeout, client, providerName, kibishiiNamespace, registryCredentialFile); err != nil {
+	if err = kibishiiPrepareBeforeBackup(oneHourTimeout, client, providerName, kibishiiNamespace, registryCredentialFile); err != nil {
 		return errors.Wrapf(err, "Failed to install and prepare data for kibishii %s", kibishiiNamespace)
 	}
 
-	if err := veleroBackupNamespace(oneHourTimeout, veleroCLI, veleroNamespace, backupName, kibishiiNamespace, backupLocation, useVolumeSnapshots); err != nil {
+	if err = veleroBackupNamespace(oneHourTimeout, veleroCLI, veleroNamespace, backupName, kibishiiNamespace, backupLocation, useVolumeSnapshots); err != nil {
 		runDebug(context.Background(), veleroCLI, veleroNamespace, backupName, "")
 		return errors.Wrapf(err, "Failed to backup kibishii namespace %s", kibishiiNamespace)
 	}
@@ -59,21 +66,21 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 		// Wait for uploads started by the Velero Plug-in for vSphere to complete
 		// TODO - remove after upload progress monitoring is implemented
 		fmt.Println("Waiting for vSphere uploads to complete")
-		if err := waitForVSphereUploadCompletion(oneHourTimeout, time.Hour, kibishiiNamespace); err != nil {
+		if err = waitForVSphereUploadCompletion(oneHourTimeout, time.Hour, kibishiiNamespace); err != nil {
 			return errors.Wrapf(err, "Error waiting for uploads to complete")
 		}
 	}
 	fmt.Printf("Simulating a disaster by removing namespace %s\n", kibishiiNamespace)
-	if err := deleteNamespace(oneHourTimeout, client, kibishiiNamespace, true); err != nil {
+	if err = deleteNamespace(oneHourTimeout, client, kibishiiNamespace, true); err != nil {
 		return errors.Wrapf(err, "failed to delete namespace %s", kibishiiNamespace)
 	}
 
-	if err := veleroRestore(oneHourTimeout, veleroCLI, veleroNamespace, restoreName, backupName); err != nil {
+	if err = veleroRestore(oneHourTimeout, veleroCLI, veleroNamespace, restoreName, backupName); err != nil {
 		runDebug(context.Background(), veleroCLI, veleroNamespace, "", restoreName)
 		return errors.Wrapf(err, "Restore %s failed from backup %s", restoreName, backupName)
 	}
 
-	if err := kibishiiVerifyAfterRestore(client, kibishiiNamespace, oneHourTimeout); err != nil {
+	if err = kibishiiVerifyAfterRestore(client, kibishiiNamespace, oneHourTimeout); err != nil {
 		return errors.Wrapf(err, "Error verifying kibishii after restore")
 	}
 
