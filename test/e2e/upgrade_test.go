@@ -32,9 +32,9 @@ const (
 )
 
 // Upgrade test by Kibishi using restic
-var _ = Describe("[Upgrade][Restic] Velero upgrade tests on cluster using the plugin provider for object storage and Restic for volume backups", backup_upgrade_restore_with_restic)
+//var _ = Describe("[Upgrade][Restic] Velero upgrade tests on cluster using the plugin provider for object storage and Restic for volume backups", backup_upgrade_restore_with_restic)
 
-var _ = Describe("[Upgrade][Snapshot] Velero upgrade tests on cluster using the plugin provider for object storage and snapshots for volume backups", backup_upgrade_restore_with_snapshots)
+//var _ = Describe("[Upgrade][Snapshot] Velero upgrade tests on cluster using the plugin provider for object storage and snapshots for volume backups", backup_upgrade_restore_with_snapshots)
 
 func backup_upgrade_restore_with_snapshots() {
 	backup_upgrade_restore_test(true)

@@ -215,7 +215,8 @@ func veleroBackupNamespace(ctx context.Context, veleroCLI string, veleroNamespac
 	}
 	err = checkBackupPhase(ctx, veleroCLI, veleroNamespace, backupName, velerov1api.BackupPhaseCompleted)
 
-	return err
+	return fmt.Errorf("error")
+	//return err
 }
 
 // veleroBackupExcludeNamespaces uses the veleroCLI to backup a namespace.

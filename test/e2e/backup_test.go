@@ -18,7 +18,6 @@ package e2e
 import (
 	"context"
 	"flag"
-	"fmt"
 
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo"
@@ -80,60 +79,62 @@ func backup_restore_test(useVolumeSnapshots bool) {
 			Expect(runKibishiiTests(client, cloudProvider, veleroCLI, veleroNamespace, backupName, restoreName, "", useVolumeSnapshots, registryCredentialFile)).To(Succeed(),
 				"Failed to successfully backup and restore Kibishii namespace")
 		})
-
-		It("should successfully back up and restore to an additional BackupStorageLocation with unique credentials", func() {
-			if additionalBSLProvider == "" {
-				Skip("no additional BSL provider given, not running multiple BackupStorageLocation with unique credentials tests")
-			}
-
-			if additionalBSLBucket == "" {
-				Skip("no additional BSL bucket given, not running multiple BackupStorageLocation with unique credentials tests")
-			}
-
-			if additionalBSLCredentials == "" {
-				Skip("no additional BSL credentials given, not running multiple BackupStorageLocation with unique credentials tests")
-			}
-
-			Expect(veleroAddPluginsForProvider(context.TODO(), veleroCLI, veleroNamespace, additionalBSLProvider)).To(Succeed())
-
-			// Create Secret for additional BSL
-			secretName := fmt.Sprintf("bsl-credentials-%s", uuidgen)
-			secretKey := fmt.Sprintf("creds-%s", additionalBSLProvider)
-			files := map[string]string{
-				secretKey: additionalBSLCredentials,
-			}
-
-			Expect(createSecretFromFiles(context.TODO(), client, veleroNamespace, secretName, files)).To(Succeed())
-
-			// Create additional BSL using credential
-			additionalBsl := fmt.Sprintf("bsl-%s", uuidgen)
-			Expect(veleroCreateBackupLocation(context.TODO(),
-				veleroCLI,
-				veleroNamespace,
-				additionalBsl,
-				additionalBSLProvider,
-				additionalBSLBucket,
-				additionalBSLPrefix,
-				additionalBSLConfig,
-				secretName,
-				secretKey,
-			)).To(Succeed())
-
-			bsls := []string{"default", additionalBsl}
-
-			for _, bsl := range bsls {
-				backupName = fmt.Sprintf("backup-%s", bsl)
-				restoreName = fmt.Sprintf("restore-%s", bsl)
-				// We limit the length of backup name here to avoid the issue of vsphere plugin https://github.com/vmware-tanzu/velero-plugin-for-vsphere/issues/370
-				// We can remove the logic once the issue is fixed
-				if bsl == "default" {
-					backupName = fmt.Sprintf("%s-%s", backupName, uuidgen)
-					restoreName = fmt.Sprintf("%s-%s", restoreName, uuidgen)
+		/*
+			It("should successfully back up and restore to an additional BackupStorageLocation with unique credentials", func() {
+				if additionalBSLProvider == "" {
+					Skip("no additional BSL provider given, not running multiple BackupStorageLocation with unique credentials tests")
 				}
 
-				Expect(runKibishiiTests(client, cloudProvider, veleroCLI, veleroNamespace, backupName, restoreName, bsl, useVolumeSnapshots, registryCredentialFile)).To(Succeed(),
-					"Failed to successfully backup and restore Kibishii namespace using BSL %s", bsl)
-			}
-		})
+				if additionalBSLBucket == "" {
+					Skip("no additional BSL bucket given, not running multiple BackupStorageLocation with unique credentials tests")
+				}
+
+				if additionalBSLCredentials == "" {
+					Skip("no additional BSL credentials given, not running multiple BackupStorageLocation with unique credentials tests")
+				}
+
+				Expect(veleroAddPluginsForProvider(context.TODO(), veleroCLI, veleroNamespace, additionalBSLProvider)).To(Succeed())
+
+				// Create Secret for additional BSL
+				secretName := fmt.Sprintf("bsl-credentials-%s", uuidgen)
+				secretKey := fmt.Sprintf("creds-%s", additionalBSLProvider)
+				files := map[string]string{
+					secretKey: additionalBSLCredentials,
+				}
+
+				Expect(createSecretFromFiles(context.TODO(), client, veleroNamespace, secretName, files)).To(Succeed())
+
+				// Create additional BSL using credential
+				additionalBsl := fmt.Sprintf("bsl-%s", uuidgen)
+				Expect(veleroCreateBackupLocation(context.TODO(),
+					veleroCLI,
+					veleroNamespace,
+					additionalBsl,
+					additionalBSLProvider,
+					additionalBSLBucket,
+					additionalBSLPrefix,
+					additionalBSLConfig,
+					secretName,
+					secretKey,
+				)).To(Succeed())
+
+				bsls := []string{"default", additionalBsl}
+
+				for _, bsl := range bsls {
+					backupName = fmt.Sprintf("backup-%s", bsl)
+					restoreName = fmt.Sprintf("restore-%s", bsl)
+					// We limit the length of backup name here to avoid the issue of vsphere plugin https://github.com/vmware-tanzu/velero-plugin-for-vsphere/issues/370
+					// We can remove the logic once the issue is fixed
+					if bsl == "default" {
+						backupName = fmt.Sprintf("%s-%s", backupName, uuidgen)
+						restoreName = fmt.Sprintf("%s-%s", restoreName, uuidgen)
+					}
+
+					Expect(runKibishiiTests(client, cloudProvider, veleroCLI, veleroNamespace, backupName, restoreName, bsl, useVolumeSnapshots, registryCredentialFile)).To(Succeed(),
+						"Failed to successfully backup and restore Kibishii namespace using BSL %s", bsl)
+				}
+			})
+
+		*/
 	})
 }
