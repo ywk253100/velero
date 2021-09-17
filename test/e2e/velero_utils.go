@@ -49,7 +49,7 @@ func getProviderPlugins(providerName string) []string {
 	case "azure":
 		return []string{"velero/velero-plugin-for-microsoft-azure:v1.2.0"}
 	case "vsphere":
-		return []string{"velero/velero-plugin-for-aws:v1.2.1", "vsphereveleroplugin/velero-plugin-for-vsphere:v1.1.1"}
+		return []string{"velero/velero-plugin-for-aws:v1.2.1", "vsphereveleroplugin/velero-plugin-for-vsphere:v1.2.1"}
 	case "gcp":
 		return []string{"velero/velero-plugin-for-gcp:v1.2.1"}
 	default:
