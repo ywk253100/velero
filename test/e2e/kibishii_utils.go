@@ -42,9 +42,9 @@ func runKibishiiTests(client testClient, providerName, veleroCLI, veleroNamespac
 		return errors.Wrapf(err, "Failed to create namespace %s to install Kibishii workload", kibishiiNamespace)
 	}
 	defer func() {
-		if err := deleteNamespace(context.Background(), client, kibishiiNamespace, true); err != nil {
-			fmt.Println(errors.Wrapf(err, "failed to delete the namespace %q", kibishiiNamespace))
-		}
+		//if err := deleteNamespace(context.Background(), client, kibishiiNamespace, true); err != nil {
+		//	fmt.Println(errors.Wrapf(err, "failed to delete the namespace %q", kibishiiNamespace))
+		//}
 	}()
 	if err := kibishiiPrepareBeforeBackup(oneHourTimeout, client, providerName, kibishiiNamespace, registryCredentialFile); err != nil {
 		return errors.Wrapf(err, "Failed to install and prepare data for kibishii %s", kibishiiNamespace)
