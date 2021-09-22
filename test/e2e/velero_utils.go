@@ -235,7 +235,7 @@ func veleroBackupNamespace(ctx context.Context, veleroCLI string, veleroNamespac
 	if useVolumeSnapshots {
 		args = append(args, "--snapshot-volumes")
 	} else {
-		args = append(args, "--snapshot-volumes", "false")
+		args = append(args, "--snapshot-volumes=false")
 		args = append(args, "--default-volumes-to-restic")
 	}
 	if backupLocation != "" {
