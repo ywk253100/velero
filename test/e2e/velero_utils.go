@@ -69,7 +69,7 @@ var pluginsMatrix = map[string]map[string][]string{
 	"main": {
 		"aws":     {"velero/velero-plugin-for-aws:main"},
 		"azure":   {"velero/velero-plugin-for-microsoft-azure:main"},
-		"vsphere": {"velero/velero-plugin-for-aws:main"},
+		"vsphere": {"velero/velero-plugin-for-aws:main", "vsphereveleroplugin/velero-plugin-for-vsphere:v1.1.1"},
 		"gcp":     {"velero/velero-plugin-for-gcp:main"},
 	},
 }
@@ -235,6 +235,7 @@ func veleroBackupNamespace(ctx context.Context, veleroCLI string, veleroNamespac
 	if useVolumeSnapshots {
 		args = append(args, "--snapshot-volumes")
 	} else {
+		args = append(args, "--snapshot-volumes", "false")
 		args = append(args, "--default-volumes-to-restic")
 	}
 	if backupLocation != "" {
