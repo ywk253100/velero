@@ -66,13 +66,13 @@ func backup_restore_test(useVolumeSnapshots bool) {
 
 	AfterEach(func() {
 		if installVelero {
-			err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 	})
 
 	When("kibishii is the sample workload", func() {
-		It("should be successfully backed up and restored to the default BackupStorageLocation", func() {
+		FIt("should be successfully backed up and restored to the default BackupStorageLocation", func() {
 			backupName = "backup-" + uuidgen.String()
 			restoreName = "restore-" + uuidgen.String()
 			// Even though we are using Velero's CloudProvider plugin for object storage, the kubernetes cluster is running on
