@@ -121,7 +121,7 @@ func backup_restore_test(useVolumeSnapshots bool) {
 				secretKey,
 			)).To(Succeed())
 
-			bsls := []string{additionalBsl}
+			bsls := []string{"default", additionalBsl}
 
 			for _, bsl := range bsls {
 				backupName = fmt.Sprintf("backup-%s", bsl)

@@ -55,6 +55,9 @@ func patchServiceAccountWithImagePullSecret(ctx context.Context, client testClie
 	secret := builder.ForSecret(namespace, secretName).Data(map[string][]byte{".dockerconfigjson": credential}).Result()
 	secret.Type = corev1.SecretTypeDockerConfigJson
 	if _, err = client.clientGo.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
 		return errors.Wrapf(err, "failed to create secret %q under namespace %q", secretName, namespace)
 	}
 
