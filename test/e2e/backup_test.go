@@ -60,7 +60,7 @@ func backup_restore_test(useVolumeSnapshots bool) {
 		Expect(err).To(Succeed())
 		if installVelero {
 			Expect(veleroInstall(context.Background(), veleroCLI, veleroImage, resticHelperImage, plugins, veleroNamespace, cloudProvider, objectStoreProvider, useVolumeSnapshots,
-				cloudCredentialsFile, bslBucket, bslPrefix, bslConfig, vslConfig, crdsVersion, "", registryCredentialFile)).To(Succeed())
+				cloudCredentialsFile, bslBucket, bslPrefix, bslConfig, vslConfig, crdsVersion, "decouple-vsphere-csi-driver", registryCredentialFile)).To(Succeed())
 		}
 	})
 
