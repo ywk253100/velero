@@ -66,20 +66,22 @@ func backup_restore_test(useVolumeSnapshots bool) {
 
 	AfterEach(func() {
 		if installVelero {
-			err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
-			Expect(err).To(Succeed())
+			//err = veleroUninstall(context.Background(), veleroCLI, veleroNamespace)
+			//Expect(err).To(Succeed())
 		}
 	})
 
 	When("kibishii is the sample workload", func() {
-		It("should be successfully backed up and restored to the default BackupStorageLocation", func() {
-			backupName = "backup-" + uuidgen.String()
-			restoreName = "restore-" + uuidgen.String()
-			// Even though we are using Velero's CloudProvider plugin for object storage, the kubernetes cluster is running on
-			// KinD. So use the kind installation for Kibishii.
-			Expect(runKibishiiTests(client, cloudProvider, veleroCLI, veleroNamespace, backupName, restoreName, "", useVolumeSnapshots, registryCredentialFile)).To(Succeed(),
-				"Failed to successfully backup and restore Kibishii namespace")
-		})
+		/*
+			It("should be successfully backed up and restored to the default BackupStorageLocation", func() {
+				backupName = "backup-" + uuidgen.String()
+				restoreName = "restore-" + uuidgen.String()
+				// Even though we are using Velero's CloudProvider plugin for object storage, the kubernetes cluster is running on
+				// KinD. So use the kind installation for Kibishii.
+				Expect(runKibishiiTests(client, cloudProvider, veleroCLI, veleroNamespace, backupName, restoreName, "", useVolumeSnapshots, registryCredentialFile)).To(Succeed(),
+					"Failed to successfully backup and restore Kibishii namespace")
+			})
+		*/
 
 		It("should successfully back up and restore to an additional BackupStorageLocation with unique credentials", func() {
 			if additionalBSLProvider == "" {
@@ -119,7 +121,7 @@ func backup_restore_test(useVolumeSnapshots bool) {
 				secretKey,
 			)).To(Succeed())
 
-			bsls := []string{"default", additionalBsl}
+			bsls := []string{additionalBsl}
 
 			for _, bsl := range bsls {
 				backupName = fmt.Sprintf("backup-%s", bsl)
