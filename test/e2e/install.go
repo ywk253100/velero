@@ -288,6 +288,49 @@ func patchResources(ctx context.Context, resources *unstructured.UnstructuredLis
 		fmt.Printf("the restic restore helper image is set by the configmap %q \n", "restic-restore-action-config")
 	}
 
+	vspherePluginConfig := corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ConfigMap",
+			APIVersion: corev1.SchemeGroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "velero-vsphere-plugin-config",
+			Namespace: namespace,
+		},
+		Data: map[string]string{
+			"cluster_flavor":           "VANILLA",
+			"vsphere_secret_name":      "vsphere-config-secret",
+			"vsphere_secret_namespace": "kube-system",
+		},
+	}
+
+	un, err := toUnstructured(vspherePluginConfig)
+	if err != nil {
+		return errors.Wrapf(err, "failed to convert vsphere plugin config to unstructure")
+	}
+	resources.Items = append(resources.Items, un)
+
+	vspherePluginFeatureStates := corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ConfigMap",
+			APIVersion: corev1.SchemeGroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "velero-vsphere-plugin-feature-states",
+			Namespace: namespace,
+		},
+		Data: map[string]string{
+			"decouple-vsphere-csi-driver": "true",
+			"local-mode":                  "false",
+		},
+	}
+
+	un, err = toUnstructured(vspherePluginFeatureStates)
+	if err != nil {
+		return errors.Wrapf(err, "failed to convert vsphere plugin feature states to unstructure")
+	}
+	resources.Items = append(resources.Items, un)
+
 	return nil
 }
 
