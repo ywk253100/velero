@@ -47,5 +47,5 @@ require (
 
 replace github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 
-replace github.com/form3tech-oss/jwt-go => github.com/golang-jwt/jwt/v4 v4.0.0
+//replace github.com/form3tech-oss/jwt-go => github.com/golang-jwt/jwt/v4 v4.0.0
 replace github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.0.0
