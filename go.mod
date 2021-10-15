@@ -14,6 +14,7 @@ require (
 	github.com/fatih/color v1.10.0
 	github.com/gobwas/glob v0.2.3
 	github.com/gofrs/uuid v3.2.0+incompatible
+	github.com/golang-jwt/jwt/v4 v4.1.0 // indirect
 	github.com/golang/protobuf v1.4.3
 	github.com/google/uuid v1.1.2
 	github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd
@@ -47,5 +48,6 @@ require (
 
 replace github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 
-replace github.com/form3tech-oss/jwt-go => github.com/dgrijalva/jwt-go/v4 v4.0.0-preview1
-replace github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.0.0
+replace github.com/form3tech-oss/jwt-go => github.com/golang-jwt/jwt/v4 v4.0.0
+
+replace github.com/dgrijalva/jwt-go => github.com/dgrijalva/jwt-go/v4 v4.0.0-preview1
