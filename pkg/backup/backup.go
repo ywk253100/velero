@@ -109,6 +109,7 @@ func NewKubernetesBackupper(
 	defaultVolumesToRestic bool,
 	clientPageSize int,
 ) (Backupper, error) {
+	fmt.Printf("################(NewKubernetesBackupper)clientPageSize: %d\n", clientPageSize)
 	return &kubernetesBackupper{
 		backupClient:           backupClient,
 		discoveryHelper:        discoveryHelper,

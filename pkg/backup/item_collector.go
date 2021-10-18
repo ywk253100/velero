@@ -298,7 +298,9 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		log.Info("Listing items")
 		unstructuredItems := make([]unstructured.Unstructured, 0)
 
+		fmt.Printf("################(getResourceItems)r.PageSize: %d\n", r.pageSize)
 		if r.pageSize > 0 {
+			fmt.Printf("################(getResourceItems)entering if\n")
 			// If limit is positive, use a pager to split list over multiple requests
 			// Use Velero's dynamic list function instead of the default
 			listFunc := pager.SimplePageFunc(func(opts metav1.ListOptions) (runtime.Object, error) {
@@ -325,6 +327,7 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 				return nil
 			})
 			if statusError, isStatusError := err.(*apierrors.StatusError); isStatusError && statusError.Status().Reason == metav1.StatusReasonExpired {
+				fmt.Printf("################(getResourceItems)entering if and fall back to unpage listing\n")
 				log.WithError(errors.WithStack(err)).Error("Error paging item list. Falling back on unpaginated list")
 				unstructuredList, err := resourceClient.List(listOptions)
 				if err != nil {

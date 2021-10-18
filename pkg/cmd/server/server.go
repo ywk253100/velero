@@ -92,7 +92,7 @@ const (
 	// server's client default qps and burst
 	defaultClientQPS      float32 = 20.0
 	defaultClientBurst    int     = 30
-	defaultClientPageSize int     = 500
+	defaultClientPageSize int     = 1
 
 	defaultProfilerAddress = "localhost:6060"
 
