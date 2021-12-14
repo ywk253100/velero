@@ -220,17 +220,10 @@ func (s *resticServer) run() {
 		credentialFileStore,
 	)
 
-	restoreController := controller.NewPodVolumeRestoreController(
-		s.logger,
-		s.veleroInformerFactory.Velero().V1().PodVolumeRestores(),
-		s.veleroClient.VeleroV1(),
-		s.podInformer,
-		s.kubeInformerFactory.Core().V1().PersistentVolumeClaims(),
-		s.kubeInformerFactory.Core().V1().PersistentVolumes(),
-		s.mgr.GetClient(),
-		os.Getenv("NODE_NAME"),
-		credentialFileStore,
-	)
+	restoreReconciler := controller.NewPodVolumeRestoreReconciler(s.mgr.GetClient(), s.logger, os.Getenv("NODE_NAME"), credentialFileStore)
+	if err = restoreReconciler.SetupWithManager(s.mgr); err != nil {
+		s.logger.WithError(err).Fatal("Unable to create the pod volume restore controller")
+	}
 
 	go s.veleroInformerFactory.Start(s.ctx.Done())
 	go s.kubeInformerFactory.Start(s.ctx.Done())
@@ -244,7 +237,6 @@ func (s *resticServer) run() {
 	// Adding the controllers to the manager will register them as a (runtime-controller) runnable,
 	// so the manager will ensure the cache is started and ready before all controller are started
 	s.mgr.Add(managercontroller.Runnable(backupController, 1))
-	s.mgr.Add(managercontroller.Runnable(restoreController, 1))
 
 	s.logger.Info("Controllers starting...")
 

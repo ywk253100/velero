@@ -84,6 +84,8 @@ type PodVolumeRestoreStatus struct {
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// +kubebuilder:object:root
+// +kubebuilder:subresource:status
 type PodVolumeRestore struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -98,6 +100,7 @@ type PodVolumeRestore struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+//+kubebuilder:object:root
 
 // PodVolumeRestoreList is a list of PodVolumeRestores.
 type PodVolumeRestoreList struct {

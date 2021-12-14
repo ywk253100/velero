@@ -50,20 +50,21 @@ git_sha = str(local("git rev-parse HEAD", quiet = True, echo_off = True)).strip(
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.17 as tilt-helper
+FROM demo.goharbor.io/velero/tilt-helper as tilt-helper
+#FROM golang:1.17 as tilt-helper
 
 # Support live reloading with Tilt
-RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
-    wget --output-document /start.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/start.sh && \
-    chmod +x /start.sh && chmod +x /restart.sh
+#RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
+#    wget --output-document /start.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/start.sh && \
+#    chmod +x /start.sh && chmod +x /restart.sh
 """
 
 additional_docker_helper_commands = """
 # Install delve to allow debugging
-RUN go get github.com/go-delve/delve/cmd/dlv
+#RUN go get github.com/go-delve/delve/cmd/dlv
 
-RUN wget -qO- https://dl.k8s.io/v1.19.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
-RUN wget -qO- https://get.docker.com | sh
+#RUN wget -qO- https://dl.k8s.io/v1.19.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
+#RUN wget -qO- https://get.docker.com | sh
 """
 
 additional_docker_build_commands = """
@@ -95,16 +96,16 @@ local_resource(
     ignore = ["pkg/cmd"],
 )
 
-local_resource(
-    "velero_local_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOOS=' + local_goos + ' GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
-    deps = ["internal", "pkg/cmd"],
-)
+#local_resource(
+#    "velero_local_binary",
+#    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOOS=' + local_goos + ' GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+#    deps = ["internal", "pkg/cmd"],
+#)
 
-local_resource(
-    "restic_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/restic; BIN=velero GOOS=' + local_goos + ' GOARCH=amd64 RESTIC_VERSION=0.12.0 OUTPUT_DIR=_tiltbuild/restic ./hack/download-restic.sh',
-)
+#local_resource(
+#    "restic_binary",
+#    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/restic; BIN=velero GOOS=linux GOARCH=amd64 RESTIC_VERSION=0.12.0 OUTPUT_DIR=_tiltbuild/restic ./hack/download-restic.sh',
+#)
 
 # Note: we need a distro with a bash shell to exec into the Velero container
 tilt_dockerfile_header = """

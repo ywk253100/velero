@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/pkg/errors"
 	corev1api "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -135,6 +137,50 @@ func GetVolumeDirectory(pod *corev1api.Pod, volumeName string, pvcLister corev1l
 	}
 
 	pv, err := pvLister.Get(pvc.Spec.VolumeName)
+	if err != nil {
+		return "", errors.WithStack(err)
+	}
+
+	// PV's been created with a CSI source.
+	if pv.Spec.CSI != nil {
+		return pvc.Spec.VolumeName + "/mount", nil
+	}
+
+	return pvc.Spec.VolumeName, nil
+}
+
+func GetVolumeDirectory2(pod *corev1api.Pod, volumeName string, cli client.Client) (string, error) {
+	var volume *corev1api.Volume
+
+	for _, item := range pod.Spec.Volumes {
+		if item.Name == volumeName {
+			volume = &item
+			break
+		}
+	}
+
+	if volume == nil {
+		return "", errors.New("volume not found in pod")
+	}
+
+	// This case implies the administrator created the PV and attached it directly, without PVC.
+	// Note that only one VolumeSource can be populated per Volume on a pod
+	if volume.VolumeSource.PersistentVolumeClaim == nil {
+		if volume.VolumeSource.CSI != nil {
+			return volume.Name + "/mount", nil
+		}
+		return volume.Name, nil
+	}
+
+	// Most common case is that we have a PVC VolumeSource, and we need to check the PV it points to for a CSI source.
+	pvc := &corev1api.PersistentVolumeClaim{}
+	err := cli.Get(context.Background(), client.ObjectKey{Namespace: pod.Namespace, Name: volume.VolumeSource.PersistentVolumeClaim.ClaimName}, pvc)
+	if err != nil {
+		return "", errors.WithStack(err)
+	}
+
+	pv := &corev1api.PersistentVolume{}
+	err = cli.Get(context.Background(), client.ObjectKey{Namespace: pod.Namespace, Name: pvc.Spec.VolumeName}, pv)
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
