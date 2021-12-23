@@ -208,7 +208,7 @@ func (c *podVolumeBackupController) processBackup(req *velerov1api.PodVolumeBack
 		return c.fail(req, errors.Wrap(err, "error getting pod").Error(), log)
 	}
 
-	volumeDir, err := kube.GetVolumeDirectory(pod, req.Spec.Volume, c.pvcLister, c.pvLister)
+	volumeDir, err := kube.GetVolumeDirectoryDeprecated(pod, req.Spec.Volume, c.pvcLister, c.pvLister)
 	if err != nil {
 		log.WithError(err).Error("Error getting volume directory name")
 		return c.fail(req, errors.Wrap(err, "error getting volume directory name").Error(), log)

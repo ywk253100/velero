@@ -18,140 +18,93 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
-	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/vmware-tanzu/velero/internal/credentials"
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	"github.com/vmware-tanzu/velero/pkg/util/kube"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/clock"
-	corev1informers "k8s.io/client-go/informers/core/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
-	k8scache "sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/cluster-api/util/patch"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov1client "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/typed/velero/v1"
-	informers "github.com/vmware-tanzu/velero/pkg/generated/informers/externalversions/velero/v1"
-	listers "github.com/vmware-tanzu/velero/pkg/generated/listers/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/restic"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-type podVolumeRestoreController struct {
-	*genericController
-
-	podVolumeRestoreClient velerov1client.PodVolumeRestoresGetter
-	podVolumeRestoreLister listers.PodVolumeRestoreLister
-	podLister              corev1listers.PodLister
-	pvcLister              corev1listers.PersistentVolumeClaimLister
-	pvLister               corev1listers.PersistentVolumeLister
-	backupLocationInformer k8scache.Informer
-	kbClient               client.Client
-	nodeName               string
-	credentialsFileStore   credentials.FileStore
-
-	processRestoreFunc func(*velerov1api.PodVolumeRestore) error
-	fileSystem         filesystem.Interface
-	clock              clock.Clock
-}
-
-// NewPodVolumeRestoreController creates a new pod volume restore controller.
-func NewPodVolumeRestoreController(
-	logger logrus.FieldLogger,
-	podVolumeRestoreInformer informers.PodVolumeRestoreInformer,
-	podVolumeRestoreClient velerov1client.PodVolumeRestoresGetter,
-	podInformer cache.SharedIndexInformer,
-	pvcInformer corev1informers.PersistentVolumeClaimInformer,
-	pvInformer corev1informers.PersistentVolumeInformer,
-	kbClient client.Client,
-	nodeName string,
-	credentialsFileStore credentials.FileStore,
-) Interface {
-	c := &podVolumeRestoreController{
-		genericController:      newGenericController(PodVolumeRestore, logger),
-		podVolumeRestoreClient: podVolumeRestoreClient,
-		podVolumeRestoreLister: podVolumeRestoreInformer.Lister(),
-		podLister:              corev1listers.NewPodLister(podInformer.GetIndexer()),
-		pvcLister:              pvcInformer.Lister(),
-		pvLister:               pvInformer.Lister(),
-		kbClient:               kbClient,
-		nodeName:               nodeName,
-		credentialsFileStore:   credentialsFileStore,
-
-		fileSystem: filesystem.NewFileSystem(),
-		clock:      &clock.RealClock{},
+func NewPodVolumeRestoreReconciler(logger logrus.FieldLogger, client client.Client, nodeName string, credentialsFileStore credentials.FileStore) *PodVolumeRestoreReconciler {
+	return &PodVolumeRestoreReconciler{
+		Client:               client,
+		logger:               logger.WithField("controller", "PodVolumeRestore"),
+		nodeName:             nodeName,
+		credentialsFileStore: credentialsFileStore,
+		fileSystem:           filesystem.NewFileSystem(),
+		clock:                &clock.RealClock{},
 	}
-
-	c.syncHandler = c.processQueueItem
-	c.cacheSyncWaiters = append(
-		c.cacheSyncWaiters,
-		podVolumeRestoreInformer.Informer().HasSynced,
-		podInformer.HasSynced,
-		pvcInformer.Informer().HasSynced,
-	)
-	c.processRestoreFunc = c.processRestore
-
-	podVolumeRestoreInformer.Informer().AddEventHandler(
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: c.pvrHandler,
-			UpdateFunc: func(_, obj interface{}) {
-				c.pvrHandler(obj)
-			},
-		},
-	)
-
-	podInformer.AddEventHandler(
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: c.podHandler,
-			UpdateFunc: func(_, obj interface{}) {
-				c.podHandler(obj)
-			},
-		},
-	)
-
-	return c
 }
 
-func (c *podVolumeRestoreController) pvrHandler(obj interface{}) {
-	pvr := obj.(*velerov1api.PodVolumeRestore)
-	log := loggerForPodVolumeRestore(c.logger, pvr)
+type PodVolumeRestoreReconciler struct {
+	client.Client
+	logger               logrus.FieldLogger
+	nodeName             string
+	credentialsFileStore credentials.FileStore
+	fileSystem           filesystem.Interface
+	clock                clock.Clock
+}
+
+func (c *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := c.logger.WithField("PodVolumeRestore", req.NamespacedName.String())
+
+	pvr := &velerov1api.PodVolumeRestore{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: req.Name}, pvr); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Warn("PodVolumeRestore not found, skip")
+			return ctrl.Result{}, nil
+		}
+		log.WithError(err).Error("Unable to get the PodVolumeRestore")
+		return ctrl.Result{}, err
+	}
+	log = log.WithField("pod", fmt.Sprintf("%s/%s", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name))
+	if len(pvr.OwnerReferences) == 1 {
+		log = log.WithField("restore", fmt.Sprintf("%s/%s", pvr.Namespace, pvr.OwnerReferences[0].Name))
+	}
 
 	if !isPVRNew(pvr) {
-		log.Debugf("Restore is not new, not enqueuing")
-		return
+		log.Debug("PodVolumeRestore is not new, skip")
+		return ctrl.Result{}, nil
 	}
 
-	pod, err := c.podLister.Pods(pvr.Spec.Pod.Namespace).Get(pvr.Spec.Pod.Name)
-	if apierrors.IsNotFound(err) {
-		log.WithError(err).Debugf("Restore's pod %s/%s not found, not enqueueing.", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)
-		return
-	}
-	if err != nil {
-		log.WithError(err).Errorf("Unable to get restore's pod %s/%s, not enqueueing.", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)
-		return
+	pod := &corev1api.Pod{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: pvr.Spec.Pod.Namespace, Name: pvr.Spec.Pod.Name}, pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.WithError(err).Debug("Pod not found, skip")
+			return ctrl.Result{}, nil
+		}
+		log.WithError(err).Error("Unable to get pod")
+		return ctrl.Result{}, err
 	}
 
 	if !isPodOnNode(pod, c.nodeName) {
-		log.Debugf("Restore's pod is not on this node, not enqueuing")
-		return
+		log.Debugf("Pod is not on this node, skip")
+		return ctrl.Result{}, nil
 	}
 
 	if !isResticInitContainerRunning(pod) {
-		log.Debug("Restore's pod is not running restic-wait init container, not enqueuing")
-		return
+		log.Debug("Pod is not running restic-wait init container, skip")
+		return ctrl.Result{}, nil
 	}
 
 	resticInitContainerIndex := getResticInitContainerIndex(pod)
@@ -160,54 +113,72 @@ func (c *podVolumeRestoreController) pvrHandler(obj interface{}) {
 		          if they interfere with volumes being restored: %s index %d`, restic.InitContainer, restic.InitContainer, resticInitContainerIndex)
 	}
 
-	log.Debug("Enqueueing")
-	c.enqueue(obj)
+	patchHelper, err := patch.NewHelper(pvr, c.Client)
+	if err != nil {
+		log.WithError(err).Error("Unable to new patch helper")
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Restore starting")
+	pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseInProgress
+	pvr.Status.StartTimestamp = &metav1.Time{Time: c.clock.Now()}
+	if err = patchHelper.Patch(ctx, pvr); err != nil {
+		log.WithError(err).Error("Unable to update status to in progress")
+		return ctrl.Result{}, err
+	}
+	if err = c.processRestore(ctx, pvr, pod, log); err != nil {
+		pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseFailed
+		pvr.Status.Message = err.Error()
+		pvr.Status.CompletionTimestamp = &metav1.Time{Time: c.clock.Now()}
+		if e := patchHelper.Patch(ctx, pvr); e != nil {
+			log.WithError(err).Error("Unable to update status to failed")
+		}
+
+		log.WithError(err).Error("Unable to process the PodVolumeRestore")
+		return ctrl.Result{}, err
+	}
+
+	pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseCompleted
+	pvr.Status.CompletionTimestamp = &metav1.Time{Time: c.clock.Now()}
+	if err = patchHelper.Patch(ctx, pvr); err != nil {
+		log.WithError(err).Error("Unable to update status to completed")
+		return ctrl.Result{}, err
+	}
+	log.Info("Restore completed")
+	return ctrl.Result{}, nil
 }
 
-func (c *podVolumeRestoreController) podHandler(obj interface{}) {
-	pod := obj.(*corev1api.Pod)
-	log := c.logger.WithField("key", kube.NamespaceAndName(pod))
+func (c *PodVolumeRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// The pod may not being scheduled at the point when its PVRs are initially reconciled.
+	// By watching the pods, we can trigger the PVR reconciliation again once the pod is finally scheduled on the node.
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&velerov1api.PodVolumeRestore{}).
+		Watches(&source.Kind{Type: &corev1api.Pod{}}, handler.EnqueueRequestsFromMapFunc(c.findVolumeRestoresForPod)).
+		Complete(c)
+}
 
-	// the pod should always be for this node since the podInformer is filtered
-	// based on node, so this is just a failsafe.
-	if !isPodOnNode(pod, c.nodeName) {
-		return
+func (c *PodVolumeRestoreReconciler) findVolumeRestoresForPod(pod client.Object) []reconcile.Request {
+	list := &velerov1api.PodVolumeRestoreList{}
+	options := &client.ListOptions{
+		LabelSelector: labels.Set(map[string]string{
+			velerov1api.PodUIDLabel: string(pod.GetUID()),
+		}).AsSelector(),
 	}
-
-	if !isResticInitContainerRunning(pod) {
-		log.Debug("Pod is not running restic-wait init container, not enqueuing restores for pod")
-		return
+	if err := c.List(context.TODO(), list, options); err != nil {
+		c.logger.WithField("pod", fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName())).WithError(err).
+			Error("unable to list PodVolumeRestores")
+		return []reconcile.Request{}
 	}
-
-	resticInitContainerIndex := getResticInitContainerIndex(pod)
-	if resticInitContainerIndex > 0 {
-		log.Warnf(`Init containers before the %s container may cause issues
-		          if they interfere with volumes being restored: %s index %d`, restic.InitContainer, restic.InitContainer, resticInitContainerIndex)
-	}
-
-	selector := labels.Set(map[string]string{
-		velerov1api.PodUIDLabel: string(pod.UID),
-	}).AsSelector()
-
-	pvrs, err := c.podVolumeRestoreLister.List(selector)
-	if err != nil {
-		log.WithError(err).Error("Unable to list pod volume restores")
-		return
-	}
-
-	if len(pvrs) == 0 {
-		return
-	}
-
-	for _, pvr := range pvrs {
-		log := loggerForPodVolumeRestore(log, pvr)
-		if !isPVRNew(pvr) {
-			log.Debug("Restore is not new, not enqueuing")
-			continue
+	requests := make([]reconcile.Request, len(list.Items))
+	for i, item := range list.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: item.GetNamespace(),
+				Name:      item.GetName(),
+			},
 		}
-		log.Debug("Enqueuing")
-		c.enqueue(pvr)
 	}
+	return requests
 }
 
 func isPVRNew(pvr *velerov1api.PodVolumeRestore) bool {
@@ -237,93 +208,12 @@ func getResticInitContainerIndex(pod *corev1api.Pod) int {
 	return -1
 }
 
-func (c *podVolumeRestoreController) processQueueItem(key string) error {
-	log := c.logger.WithField("key", key)
-	log.Debug("Running processQueueItem")
-
-	ns, name, err := cache.SplitMetaNamespaceKey(key)
+func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *velerov1api.PodVolumeRestore, pod *corev1api.Pod, log logrus.FieldLogger) error {
+	volumeDir, err := kube.GetVolumeDirectory(ctx, pod, req.Spec.Volume, c.Client)
 	if err != nil {
-		log.WithError(errors.WithStack(err)).Error("error splitting queue key")
-		return nil
+		return errors.Wrap(err, "error getting volume directory name")
 	}
 
-	req, err := c.podVolumeRestoreLister.PodVolumeRestores(ns).Get(name)
-	if apierrors.IsNotFound(err) {
-		log.Debug("Unable to find PodVolumeRestore")
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(err, "error getting PodVolumeRestore")
-	}
-
-	// Don't mutate the shared cache
-	reqCopy := req.DeepCopy()
-	return c.processRestoreFunc(reqCopy)
-}
-
-func loggerForPodVolumeRestore(baseLogger logrus.FieldLogger, req *velerov1api.PodVolumeRestore) logrus.FieldLogger {
-	log := baseLogger.WithFields(logrus.Fields{
-		"namespace": req.Namespace,
-		"name":      req.Name,
-	})
-
-	if len(req.OwnerReferences) == 1 {
-		log = log.WithField("restore", fmt.Sprintf("%s/%s", req.Namespace, req.OwnerReferences[0].Name))
-	}
-
-	return log
-}
-
-func (c *podVolumeRestoreController) processRestore(req *velerov1api.PodVolumeRestore) error {
-	log := loggerForPodVolumeRestore(c.logger, req)
-
-	log.Info("Restore starting")
-
-	var err error
-
-	// update status to InProgress
-	req, err = c.patchPodVolumeRestore(req, func(r *velerov1api.PodVolumeRestore) {
-		r.Status.Phase = velerov1api.PodVolumeRestorePhaseInProgress
-		r.Status.StartTimestamp = &metav1.Time{Time: c.clock.Now()}
-	})
-	if err != nil {
-		log.WithError(err).Error("Error setting PodVolumeRestore startTimestamp and phase to InProgress")
-		return errors.WithStack(err)
-	}
-
-	pod, err := c.podLister.Pods(req.Spec.Pod.Namespace).Get(req.Spec.Pod.Name)
-	if err != nil {
-		log.WithError(err).Errorf("Error getting pod %s/%s", req.Spec.Pod.Namespace, req.Spec.Pod.Name)
-		return c.failRestore(req, errors.Wrap(err, "error getting pod").Error(), log)
-	}
-
-	volumeDir, err := kube.GetVolumeDirectory(pod, req.Spec.Volume, c.pvcLister, c.pvLister)
-	if err != nil {
-		log.WithError(err).Error("Error getting volume directory name")
-		return c.failRestore(req, errors.Wrap(err, "error getting volume directory name").Error(), log)
-	}
-
-	// execute the restore process
-	if err := c.restorePodVolume(req, volumeDir, log); err != nil {
-		log.WithError(err).Error("Error restoring volume")
-		return c.failRestore(req, errors.Wrap(err, "error restoring volume").Error(), log)
-	}
-
-	// update status to Completed
-	if _, err = c.patchPodVolumeRestore(req, func(r *velerov1api.PodVolumeRestore) {
-		r.Status.Phase = velerov1api.PodVolumeRestorePhaseCompleted
-		r.Status.CompletionTimestamp = &metav1.Time{Time: c.clock.Now()}
-	}); err != nil {
-		log.WithError(err).Error("Error setting PodVolumeRestore completionTimestamp and phase to Completed")
-		return err
-	}
-
-	log.Info("Restore completed")
-
-	return nil
-}
-
-func (c *podVolumeRestoreController) restorePodVolume(req *velerov1api.PodVolumeRestore, volumeDir string, log logrus.FieldLogger) error {
 	// Get the full path of the new volume's directory as mounted in the daemonset pod, which
 	// will look like: /host_pods/<new-pod-uid>/volumes/<volume-plugin-name>/<volume-dir>
 	volumePath, err := singlePathMatch(fmt.Sprintf("/host_pods/%s/volumes/*/%s", string(req.Spec.Pod.UID), volumeDir))
@@ -333,8 +223,7 @@ func (c *podVolumeRestoreController) restorePodVolume(req *velerov1api.PodVolume
 
 	credsFile, err := c.credentialsFileStore.Path(restic.RepoKeySelector())
 	if err != nil {
-		log.WithError(err).Error("Error creating temp restic credentials file")
-		return c.failRestore(req, errors.Wrap(err, "error creating temp restic credentials file").Error(), log)
+		return errors.Wrap(err, "error creating temp restic credentials file")
 	}
 	// ignore error since there's nothing we can do and it's a temp file.
 	defer os.Remove(credsFile)
@@ -347,11 +236,11 @@ func (c *podVolumeRestoreController) restorePodVolume(req *velerov1api.PodVolume
 	)
 
 	backupLocation := &velerov1api.BackupStorageLocation{}
-	if err := c.kbClient.Get(context.Background(), client.ObjectKey{
+	if err := c.Get(ctx, client.ObjectKey{
 		Namespace: req.Namespace,
 		Name:      req.Spec.BackupStorageLocation,
 	}, backupLocation); err != nil {
-		return c.failRestore(req, errors.Wrap(err, "error getting backup storage location").Error(), log)
+		return errors.Wrap(err, "error getting backup storage location")
 	}
 
 	// if there's a caCert on the ObjectStorage, write it to disk so that it can be passed to restic
@@ -368,7 +257,7 @@ func (c *podVolumeRestoreController) restorePodVolume(req *velerov1api.PodVolume
 
 	env, err := restic.CmdEnv(backupLocation, c.credentialsFileStore)
 	if err != nil {
-		return c.failRestore(req, errors.Wrap(err, "error setting restic cmd env").Error(), log)
+		return errors.Wrap(err, "error setting restic cmd env")
 	}
 	resticCmd.Env = env
 
@@ -411,55 +300,18 @@ func (c *podVolumeRestoreController) restorePodVolume(req *velerov1api.PodVolume
 	return nil
 }
 
-func (c *podVolumeRestoreController) patchPodVolumeRestore(req *velerov1api.PodVolumeRestore, mutate func(*velerov1api.PodVolumeRestore)) (*velerov1api.PodVolumeRestore, error) {
-	// Record original json
-	oldData, err := json.Marshal(req)
-	if err != nil {
-		return nil, errors.Wrap(err, "error marshalling original PodVolumeRestore")
-	}
-
-	// Mutate
-	mutate(req)
-
-	// Record new json
-	newData, err := json.Marshal(req)
-	if err != nil {
-		return nil, errors.Wrap(err, "error marshalling updated PodVolumeRestore")
-	}
-
-	patchBytes, err := jsonpatch.CreateMergePatch(oldData, newData)
-	if err != nil {
-		return nil, errors.Wrap(err, "error creating json merge patch for PodVolumeRestore")
-	}
-
-	req, err = c.podVolumeRestoreClient.PodVolumeRestores(req.Namespace).Patch(context.TODO(), req.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
-	if err != nil {
-		return nil, errors.Wrap(err, "error patching PodVolumeRestore")
-	}
-
-	return req, nil
-}
-
-func (c *podVolumeRestoreController) failRestore(req *velerov1api.PodVolumeRestore, msg string, log logrus.FieldLogger) error {
-	if _, err := c.patchPodVolumeRestore(req, func(pvr *velerov1api.PodVolumeRestore) {
-		pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseFailed
-		pvr.Status.Message = msg
-		pvr.Status.CompletionTimestamp = &metav1.Time{Time: c.clock.Now()}
-	}); err != nil {
-		log.WithError(err).Error("Error setting PodVolumeRestore phase to Failed")
-		return err
-	}
-	return nil
-}
-
 // updateRestoreProgressFunc returns a func that takes progress info and patches
 // the PVR with the new progress
-func (c *podVolumeRestoreController) updateRestoreProgressFunc(req *velerov1api.PodVolumeRestore, log logrus.FieldLogger) func(velerov1api.PodVolumeOperationProgress) {
+func (c *PodVolumeRestoreReconciler) updateRestoreProgressFunc(req *velerov1api.PodVolumeRestore, log logrus.FieldLogger) func(velerov1api.PodVolumeOperationProgress) {
 	return func(progress velerov1api.PodVolumeOperationProgress) {
-		if _, err := c.patchPodVolumeRestore(req, func(r *velerov1api.PodVolumeRestore) {
-			r.Status.Progress = progress
-		}); err != nil {
-			log.WithError(err).Error("error updating PodVolumeRestore progress")
+		helper, err := patch.NewHelper(req, c.Client)
+		if err != nil {
+			log.WithError(err).Error("Unable to new patch helper")
+			return
+		}
+		req.Status.Progress = progress
+		if err = helper.Patch(context.Background(), req); err != nil {
+			log.WithError(err).Error("Unable to update PodVolumeRestore progress")
 		}
 	}
 }
