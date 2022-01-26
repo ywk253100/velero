@@ -137,6 +137,8 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 		args = append(args, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
 	}
 
+	args = append(args, "--log-level=debug")
+
 	if c.defaultVolumesToRestic {
 		args = append(args, "--default-volumes-to-restic=true")
 	}
