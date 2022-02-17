@@ -238,9 +238,11 @@ func (c *backupController) processBackup(key string) error {
 	default:
 		return nil
 	}
+	fmt.Printf("###panic-debug### original: %v \n", original.Spec.DefaultVolumesToRestic)
 
 	log.Debug("Preparing backup request")
 	request := c.prepareBackupRequest(original)
+	fmt.Printf("###panic-debug### after prepare: %v \n", request.Spec.DefaultVolumesToRestic)
 
 	if len(request.Status.ValidationErrors) > 0 {
 		request.Status.Phase = velerov1api.BackupPhaseFailedValidation
@@ -254,9 +256,13 @@ func (c *backupController) processBackup(key string) error {
 	if err != nil {
 		return errors.Wrapf(err, "error updating Backup status to %s", request.Status.Phase)
 	}
+	fmt.Printf("###panic-debug### after patch: %v \n", updatedBackup.Spec.DefaultVolumesToRestic)
+
 	// store ref to just-updated item for creating patch
 	original = updatedBackup
+
 	request.Backup = updatedBackup.DeepCopy()
+	fmt.Printf("###panic-debug### after DeepCopy %v \n", request.Spec.DefaultVolumesToRestic)
 
 	if request.Status.Phase == velerov1api.BackupPhaseFailedValidation {
 		return nil
@@ -306,16 +312,19 @@ func patchBackup(original, updated *velerov1api.Backup, client velerov1client.Ba
 	if err != nil {
 		return nil, errors.Wrap(err, "error marshalling original backup")
 	}
+	fmt.Printf("###panic-debug### inside patchBackup origBytes: %s \n", string(origBytes))
 
 	updatedBytes, err := json.Marshal(updated)
 	if err != nil {
 		return nil, errors.Wrap(err, "error marshalling updated backup")
 	}
+	fmt.Printf("###panic-debug### inside patchBackup updatedBytes: %s \n", string(updatedBytes))
 
 	patchBytes, err := jsonpatch.CreateMergePatch(origBytes, updatedBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating json merge patch for backup")
 	}
+	fmt.Printf("###panic-debug### inside patchBackup patchBytes: %s \n", string(patchBytes))
 
 	res, err := client.Backups(original.Namespace).Patch(context.TODO(), original.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
 	if err != nil {

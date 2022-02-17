@@ -248,6 +248,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		go backupInformer.Run(stop)
 	}
 
+	fmt.Printf("============%v \n", backup)
+	fmt.Printf("============%v \n", backup.Spec)
+	fmt.Printf("============%v \n", backup.Spec.DefaultVolumesToRestic)
+
 	_, err = o.client.VeleroV1().Backups(backup.Namespace).Create(context.TODO(), backup, metav1.CreateOptions{})
 	if err != nil {
 		return err
