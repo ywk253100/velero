@@ -36,8 +36,8 @@ jobs:
       with:
         version: latest
 
-    - name: Build
-      run: make local
+    #- name: Build
+    #  run: make local
 
     #- name: Test
     #  run: make test
