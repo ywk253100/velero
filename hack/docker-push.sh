@@ -82,6 +82,7 @@ echo "Highest tag found: $HIGHEST"
 echo "BRANCH: $BRANCH"
 echo "TAG: $TAG"
 echo "TAG_LATEST: $TAG_LATEST"
+echo "VERSION: $VERSION"
 echo "BUILDX_PLATFORMS: $BUILDX_PLATFORMS"
 
 echo "Building and pushing container images."
