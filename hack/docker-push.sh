@@ -71,6 +71,9 @@ if [[ ! -z "$TAG" ]]; then
 else
     echo "We're on branch $BRANCH"
     VERSION="$BRANCH"
+    if [[ "$VERSION" == release-* ]]; then
+      VERSION=${VERSION}-dev
+    fi
 fi
 
 if [[ -z "$BUILDX_PLATFORMS" ]]; then
