@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - 'main'
-      - 'release-**'
+      - '**'
     tags:
       - '*'
 
@@ -39,12 +39,13 @@ jobs:
     - name: Build
       run: make local
 
-    - name: Test
-      run: make test
+    #- name: Test
+    #  run: make test
 
     # Only try to publish the container image from the root repo; forks don't have permission to do so and will always get failures.
     - name: Publish container image
-      if: github.repository == 'vmware-tanzu/velero'
-      run: |
-        docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_PASSWORD }}
-        ./hack/docker-push.sh
+      run: ./hack/docker-push.sh
+      #if: github.repository == 'vmware-tanzu/velero'
+      #run: |
+      #  docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_PASSWORD }}
+      #  ./hack/docker-push.sh
