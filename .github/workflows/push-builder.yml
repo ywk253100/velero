@@ -15,7 +15,7 @@ jobs:
     - uses: actions/checkout@master
 
     - name: Build
-      run: make build-image
+      run: make a
 
     # Only try to publish the container image from the root repo; forks don't have permission to do so and will always get failures.
     - name: Publish container image
