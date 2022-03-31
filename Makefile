@@ -121,7 +121,6 @@ a:
 	@echo "======================"
 	@git log -10 --pretty=%h
 
-
 build-%:
 	@$(MAKE) --no-print-directory ARCH=$* build
 	@$(MAKE) --no-print-directory ARCH=$* build BIN=velero-restic-restore-helper
