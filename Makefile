@@ -116,7 +116,9 @@ all:
 
 a:
 	echo $(BUILDER_IMAGE_DOCKERFILE_REALPATH)
-	echo $(shell git log -1 --pretty=%h $(BUILDER_IMAGE_DOCKERFILE))
+	echo $(shell git log -1 --pretty=%h /home/runner/work/velero/velero/hack/build-image/Dockerfile)
+	echo $(shell git log /home/runner/work/velero/velero/hack/build-image/Dockerfile)
+
 
 build-%:
 	@$(MAKE) --no-print-directory ARCH=$* build
