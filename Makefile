@@ -115,9 +115,9 @@ all:
 	@$(MAKE) build BIN=velero-restic-restore-helper
 
 a:
-	echo $(BUILDER_IMAGE_DOCKERFILE_REALPATH)
-	echo $(shell git log -1 --pretty=%h /home/runner/work/velero/velero/hack/build-image/Dockerfile)
-	echo $(shell git log /home/runner/work/velero/velero/hack/build-image/Dockerfile)
+	@echo $(BUILDER_IMAGE_DOCKERFILE_REALPATH)
+	@echo $(shell git log --pretty=%h /home/runner/work/velero/velero/hack/build-image/Dockerfile)
+	@echo $(shell git log --pretty=%h)
 
 
 build-%:
