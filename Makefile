@@ -276,7 +276,7 @@ else
 	docker pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
 endif
 
-build-image:
+build-image: a
 	@# When we build a new image we just untag the old one.
 	@# This makes sure we don't leave the orphaned image behind.
 	$(eval old_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
