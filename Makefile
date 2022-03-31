@@ -116,9 +116,10 @@ all:
 
 a:
 	@echo $(BUILDER_IMAGE_DOCKERFILE_REALPATH)
+	@git version
 	@git log -10 --pretty=%h /home/runner/work/velero/velero/hack/build-image/Dockerfile
 	@echo "======================"
-	@shell git log -10 --pretty=%h
+	@git log -10 --pretty=%h
 
 
 build-%:
