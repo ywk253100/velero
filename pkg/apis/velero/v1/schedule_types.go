@@ -80,7 +80,7 @@ type ScheduleStatus struct {
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:object:root
+// +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status
@@ -106,7 +106,7 @@ type Schedule struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:object:root
+// +kubebuilder:object:root=true
 
 // ScheduleList is a list of Schedules.
 type ScheduleList struct {
