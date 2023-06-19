@@ -101,7 +101,7 @@ func CmdEnv(backupLocation *velerov1api.BackupStorageLocation, credentialFileSto
 			return []string{}, err
 		}
 	case repoconfig.AzureBackend:
-		customEnv, err = repoconfig.GetAzureResticEnvVars(config)
+		customEnv, err = repoconfig.GetAzureResticEnvVars(config, config[repoconfig.CredentialsFileKey])
 		if err != nil {
 			return []string{}, err
 		}

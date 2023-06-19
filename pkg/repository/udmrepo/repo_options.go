@@ -44,7 +44,6 @@ const (
 	StoreOptionS3DisableTLSVerify = "skipTLSVerify"
 	StoreOptionS3CustomCA         = "customCA"
 
-	StoreOptionAzureKey            = "storageKey"
 	StoreOptionAzureDomain         = "storageDomain"
 	StoreOptionAzureStorageAccount = "storageAccount"
 	StoreOptionAzureToken          = "sasToken"

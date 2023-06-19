@@ -19,14 +19,17 @@ package backend
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/azure"
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	azureutil "github.com/vmware-tanzu/velero/pkg/util/azure"
 )
 
 type AzureBackend struct {
 	options azure.Options
+	client  *azblob.Client
 }
 
 func (c *AzureBackend) Setup(ctx context.Context, flags map[string]string) error {
@@ -35,26 +38,45 @@ func (c *AzureBackend) Setup(ctx context.Context, flags map[string]string) error
 	if err != nil {
 		return err
 	}
-
 	c.options.StorageAccount, err = mustHaveString(udmrepo.StoreOptionAzureStorageAccount, flags)
 	if err != nil {
 		return err
 	}
+	c.options.StorageDomain, err = mustHaveString(udmrepo.StoreOptionAzureDomain, flags)
+	if err != nil {
+		return err
+	}
+	c.options.Prefix = optionalHaveString(udmrepo.StoreOptionPrefix, flags)
+	c.options.Limits = setupLimits(ctx, flags)
 
-	c.options.StorageKey, err = mustHaveString(udmrepo.StoreOptionAzureKey, flags)
+	clientOptions, err := azureutil.GetClientOptions(flags[azureutil.CredentialKeyCloudName])
 	if err != nil {
 		return err
 	}
 
-	c.options.Prefix = optionalHaveString(udmrepo.StoreOptionPrefix, flags)
-	c.options.SASToken = optionalHaveString(udmrepo.StoreOptionAzureToken, flags)
-	c.options.StorageDomain = optionalHaveString(udmrepo.StoreOptionAzureDomain, flags)
+	// auth with storage account access key
+	if flags[azureutil.CredentialKeyStorageAccountAccessKey] != "" {
+		cred, err := azblob.NewSharedKeyCredential(c.options.StorageAccount, flags[azureutil.CredentialKeyStorageAccountAccessKey])
+		if err != nil {
+			return err
+		}
+		c.client, err = azblob.NewClientWithSharedKeyCredential(c.options.StorageDomain, cred, &azblob.ClientOptions{
+			ClientOptions: clientOptions,
+		})
+		return err
+	}
 
-	c.options.Limits = setupLimits(ctx, flags)
-
-	return nil
+	// auth with Azure AD
+	cred, err := azureutil.NewCredential(flags, clientOptions)
+	if err != nil {
+		return err
+	}
+	c.client, err = azblob.NewClient(c.options.StorageDomain, cred, &azblob.ClientOptions{
+		ClientOptions: clientOptions,
+	})
+	return err
 }
 
 func (c *AzureBackend) Connect(ctx context.Context, isCreate bool) (blob.Storage, error) {
-	return azure.New(ctx, &c.options, false)
+	return azure.NewWithBlobClient(ctx, &c.options, c.client)
 }
