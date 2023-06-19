@@ -47,11 +47,9 @@ type unifiedRepoProvider struct {
 
 // this func is assigned to a package-level variable so it can be
 // replaced when unit-testing
-var getAzureCredentials = repoconfig.GetAzureCredentials
 var getS3Credentials = repoconfig.GetS3Credentials
 var getGCPCredentials = repoconfig.GetGCPCredentials
 var getS3BucketRegion = repoconfig.GetAWSBucketRegion
-var getAzureStorageDomain = repoconfig.GetAzureStorageDomain
 
 type localFuncTable struct {
 	getStorageVariables   func(*velerov1api.BackupStorageLocation, string, string) (map[string]string, error)
@@ -436,13 +434,8 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 			result[udmrepo.StoreOptionS3Token] = credValue.SessionToken
 		}
 	case repoconfig.AzureBackend:
-		storageAccount, accountKey, err := getAzureCredentials(config)
-		if err != nil {
-			return map[string]string{}, errors.Wrap(err, "error get azure credentials")
-		}
-		result[udmrepo.StoreOptionAzureStorageAccount] = storageAccount
-		result[udmrepo.StoreOptionAzureKey] = accountKey
-
+		// do nothing here, will retrive the credential in Azure provider
+		return nil, nil
 	case repoconfig.GCPBackend:
 		result[udmrepo.StoreOptionCredentialFile] = getGCPCredentials(config)
 	}
@@ -509,12 +502,9 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 			result[udmrepo.StoreOptionS3CustomCA] = base64.StdEncoding.EncodeToString(backupLocation.Spec.ObjectStorage.CACert)
 		}
 	} else if backendType == repoconfig.AzureBackend {
-		domain, err := getAzureStorageDomain(config)
-		if err != nil {
-			return map[string]string{}, errors.Wrapf(err, "error to get azure storage domain")
+		for k, v := range config {
+			result[k] = v
 		}
-
-		result[udmrepo.StoreOptionAzureDomain] = domain
 	}
 
 	result[udmrepo.StoreOptionOssBucket] = bucket

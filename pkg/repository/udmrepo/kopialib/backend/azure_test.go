@@ -27,6 +27,7 @@ import (
 
 	"github.com/kopia/kopia/repo/blob/azure"
 	"github.com/kopia/kopia/repo/blob/throttling"
+	azureutil "github.com/vmware-tanzu/velero/pkg/util/azure"
 )
 
 func TestAzureSetup(t *testing.T) {
@@ -61,16 +62,16 @@ func TestAzureSetup(t *testing.T) {
 				Container:      "fake-bucket",
 				StorageAccount: "fake-account",
 			},
-			expectedErr: "key " + udmrepo.StoreOptionAzureKey + " not found",
+			expectedErr: "key " + azureutil.CredentialKeyStorageAccountAccessKey + " not found",
 		},
 		{
 			name: "with limits",
 			flags: map[string]string{
-				udmrepo.StoreOptionOssBucket:           "fake-bucket",
-				udmrepo.StoreOptionAzureStorageAccount: "fake-account",
-				udmrepo.StoreOptionAzureKey:            "fake-key",
-				udmrepo.ThrottleOptionReadOps:          "100",
-				udmrepo.ThrottleOptionUploadBytes:      "200",
+				udmrepo.StoreOptionOssBucket:                   "fake-bucket",
+				udmrepo.StoreOptionAzureStorageAccount:         "fake-account",
+				azureutil.CredentialKeyStorageAccountAccessKey: "fake-key",
+				udmrepo.ThrottleOptionReadOps:                  "100",
+				udmrepo.ThrottleOptionUploadBytes:              "200",
 			},
 			expected: azure.Options{
 				Container:      "fake-bucket",
