@@ -19,64 +19,18 @@ package backend
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/blob/azure"
-
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	azureutil "github.com/vmware-tanzu/velero/pkg/util/azure"
 )
 
 type AzureBackend struct {
-	options azure.Options
-	client  *azblob.Client
+	config map[string]string
 }
 
 func (c *AzureBackend) Setup(ctx context.Context, flags map[string]string) error {
-	var err error
-	c.options.Container, err = mustHaveString(udmrepo.StoreOptionOssBucket, flags)
-	if err != nil {
-		return err
-	}
-	c.options.StorageAccount, err = mustHaveString(udmrepo.StoreOptionAzureStorageAccount, flags)
-	if err != nil {
-		return err
-	}
-	c.options.StorageDomain, err = mustHaveString(udmrepo.StoreOptionAzureDomain, flags)
-	if err != nil {
-		return err
-	}
-	c.options.Prefix = optionalHaveString(udmrepo.StoreOptionPrefix, flags)
-	c.options.Limits = setupLimits(ctx, flags)
-
-	clientOptions, err := azureutil.GetClientOptions(flags[azureutil.CredentialKeyCloudName])
-	if err != nil {
-		return err
-	}
-
-	// auth with storage account access key
-	if flags[azureutil.CredentialKeyStorageAccountAccessKey] != "" {
-		cred, err := azblob.NewSharedKeyCredential(c.options.StorageAccount, flags[azureutil.CredentialKeyStorageAccountAccessKey])
-		if err != nil {
-			return err
-		}
-		c.client, err = azblob.NewClientWithSharedKeyCredential(c.options.StorageDomain, cred, &azblob.ClientOptions{
-			ClientOptions: clientOptions,
-		})
-		return err
-	}
-
-	// auth with Azure AD
-	cred, err := azureutil.NewCredential(flags, clientOptions)
-	if err != nil {
-		return err
-	}
-	c.client, err = azblob.NewClient(c.options.StorageDomain, cred, &azblob.ClientOptions{
-		ClientOptions: clientOptions,
-	})
-	return err
+	c.config = flags
+	return nil
 }
 
 func (c *AzureBackend) Connect(ctx context.Context, isCreate bool) (blob.Storage, error) {
-	return azure.NewWithBlobClient(ctx, &c.options, c.client)
+	return NewAzureStorage(ctx, &c.config, false)
 }

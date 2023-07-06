@@ -35,7 +35,6 @@ import (
 	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	reposervice "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/service"
-	"github.com/vmware-tanzu/velero/pkg/util/azure"
 )
 
 type unifiedRepoProvider struct {
@@ -48,14 +47,12 @@ type unifiedRepoProvider struct {
 
 // this func is assigned to a package-level variable so it can be
 // replaced when unit-testing
-var getAzureCredentials = azure.GetStorageAccountCredentials
 var getS3Credentials = repoconfig.GetS3Credentials
 var getGCPCredentials = repoconfig.GetGCPCredentials
 var getS3BucketRegion = repoconfig.GetAWSBucketRegion
-var getAzureStorageAccountURI = azure.GetStorageAccountURI
 
 type localFuncTable struct {
-	getStorageVariables   func(*velerov1api.BackupStorageLocation, credentials.FileStore, string, string) (map[string]string, error)
+	getStorageVariables   func(*velerov1api.BackupStorageLocation, string, string) (map[string]string, error)
 	getStorageCredentials func(*velerov1api.BackupStorageLocation, credentials.FileStore) (map[string]string, error)
 }
 
@@ -341,7 +338,7 @@ func (urp *unifiedRepoProvider) GetStoreOptions(param interface{}) (map[string]s
 		return map[string]string{}, errors.Errorf("invalid parameter, expect %T, actual %T", RepoParam{}, param)
 	}
 
-	storeVar, err := funcTable.getStorageVariables(repoParam.BackupLocation, urp.credentialGetter.FromFile, urp.repoBackend, repoParam.BackupRepo.Spec.VolumeNamespace)
+	storeVar, err := funcTable.getStorageVariables(repoParam.BackupLocation, urp.repoBackend, repoParam.BackupRepo.Spec.VolumeNamespace)
 	if err != nil {
 		return map[string]string{}, errors.Wrap(err, "error to get storage variables")
 	}
@@ -432,12 +429,8 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 			result[udmrepo.StoreOptionS3Token] = credValue.SessionToken
 		}
 	case repoconfig.AzureBackend:
-		creds, err := getAzureCredentials(config, config[repoconfig.CredentialsFileKey], false)
-		if err != nil {
-			return map[string]string{}, errors.Wrap(err, "error get azure credentials")
-		}
-		return creds, nil
-
+		// do nothing here, will retrive the credential in Azure provider
+		return nil, nil
 	case repoconfig.GCPBackend:
 		result[udmrepo.StoreOptionCredentialFile] = getGCPCredentials(config)
 	}
@@ -445,7 +438,7 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 	return result, nil
 }
 
-func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, credentialsFileStore credentials.FileStore, repoBackend string, repoName string) (map[string]string, error) {
+func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repoBackend string, repoName string) (map[string]string, error) {
 	result := make(map[string]string)
 
 	backendType := repoconfig.GetBackendType(backupLocation.Spec.Provider, backupLocation.Spec.Config)
@@ -504,23 +497,9 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, cred
 			result[udmrepo.StoreOptionS3CustomCA] = base64.StdEncoding.EncodeToString(backupLocation.Spec.ObjectStorage.CACert)
 		}
 	} else if backendType == repoconfig.AzureBackend {
-		var (
-			credFile string
-			err      error
-		)
-		if backupLocation.Spec.Credential != nil {
-			credFile, err = credentialsFileStore.Path(backupLocation.Spec.Credential)
-			if err != nil {
-				return map[string]string{}, errors.Wrap(err, "error get credential file in bsl")
-			}
+		for k, v := range config {
+			result[k] = v
 		}
-		domain, err := getAzureStorageAccountURI(config, credFile)
-		if err != nil {
-			return map[string]string{}, errors.Wrapf(err, "error to get azure storage domain")
-		}
-
-		result[udmrepo.StoreOptionAzureDomain] = domain
-		result[udmrepo.StoreOptionAzureStorageAccount] = config[azure.BSLConfigStorageAccount]
 	}
 
 	result[udmrepo.StoreOptionOssBucket] = bucket

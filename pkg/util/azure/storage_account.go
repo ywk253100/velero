@@ -19,6 +19,7 @@ package azure
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
@@ -56,77 +57,64 @@ func init() {
 // GetStorageAccountCredentials returns the credentials to interactive with storage account according to the config of BSL
 // and credential file by the following order:
 // 1. Return the storage account access key direclty if it is provided
-// 2. Return the content of the credential file directly if "userAAD" is set in BSL config
-// 3. Call Azure API to get the storage account access key
-
-// TODO remove the userAAD param and read it from BSL config when Kopia support AAD and Restic is removed. Also update the related code in Azure plugin
-func GetStorageAccountCredentials(bslCfg map[string]string, credFile string, useAAD bool) (map[string]string, error) {
-	creds, err := LoadCredentials(credFile)
-	if err != nil {
-		return nil, err
-	}
-
+// 2. Return the content of the credential file directly if "userAAD" is set as true in BSL config
+// 3. Call Azure API to exchange the storage account access key
+func GetStorageAccountCredentials(bslCfg map[string]string, creds map[string]string) (map[string]string, error) {
 	// use storage account access key if specified
 	if name := bslCfg[BSLConfigStorageAccountAccessKeyName]; name != "" {
 		accessKey := creds[name]
 		if accessKey == "" {
-			return nil, errors.Errorf("no storage account access key with key %s found", name)
+			return nil, errors.Errorf("no storage account access key with key %s found in credential", name)
 		}
-		return map[string]string{CredentialKeyStorageAccountAccessKey: accessKey}, nil
-	}
-
-	/*
-		TODO uncomment this block when Kopia support AAD and Restic is removed
-		useAAD, err := strconv.ParseBool(bslCfg[udmrepo.StoreOptionAzureUseAAD])
-		if err != nil {
-			return nil, errors.Errorf("failed to parse bool for useAAD string: %s", bslCfg[udmrepo.StoreOptionAzureUseAAD])
-		}
-	*/
-
-	// use AAD
-	if useAAD {
+		creds[CredentialKeyStorageAccountAccessKey] = accessKey
 		return creds, nil
 	}
 
-	// get the storage key
-	key, err := getStorageAccountAccessKey(bslCfg, creds)
+	// use AAD
+	if bslCfg[BSLConfigUseAAD] != "" {
+		useAAD, err := strconv.ParseBool(bslCfg[BSLConfigUseAAD])
+		if err != nil {
+			return nil, errors.Errorf("failed to parse bool from useAAD string: %s", bslCfg[BSLConfigUseAAD])
+		}
+
+		if useAAD {
+			return creds, nil
+		}
+	}
+
+	// exchange the storage account access key
+	accessKey, err := exchangeStorageAccountAccessKey(bslCfg, creds)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to get storage account access key")
 	}
-	return map[string]string{CredentialKeyStorageAccountAccessKey: key}, nil
+	creds[CredentialKeyStorageAccountAccessKey] = accessKey
+	return creds, nil
 }
 
-// GetStorageAccountURI returns the storage account URI by following order:
+// TODO https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure/pull/195/files
+
+// getStorageAccountURI returns the storage account URI by the following order:
 // 1. Return the storage account URI directly if it is specified in BSL config
 // 2. Try to call Azure API to get the storage account URI if possible(Backgroud: https://github.com/vmware-tanzu/velero/issues/6163)
 // 3. Fall back to return the default URI
-
-// TODO https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure/pull/195/files
-func GetStorageAccountURI(bslCfg map[string]string, credFile string) (string, error) {
+func getStorageAccountURI(bslCfg map[string]string, creds map[string]string) (string, error) {
 	// if the URI is specified in the BSL, return it directly
 	endpoint := bslCfg[BSLConfigStorageAccountURI]
 	if endpoint != "" {
 		return endpoint, nil
 	}
 
-	creds, err := LoadCredentials(credFile)
-	if err != nil {
-		return "", err
-	}
-
 	storageAccount := bslCfg[BSLConfigStorageAccount]
-	if storageAccount == "" {
-		return "", errors.New("storageAccount is required in the BSL")
-	}
 
-	cloudCfg, err := GetCloudConfiguration(creds[CredentialKeyCloudName])
+	cloudCfg, err := getCloudConfiguration(creds[CredentialKeyCloudName])
 	if err != nil {
 		return "", err
 	}
 
-	uri := fmt.Sprintf("https:%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob])
+	// the default URI
+	uri := fmt.Sprintf("https://%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob])
 
-	// if storage account access key provided, the credential cannot be used to get the storage account properties,
+	// the storage account access key cannot be used to get the storage account properties,
 	// so fallback to the default URI
 	if name := bslCfg[BSLConfigStorageAccountAccessKeyName]; name != "" && creds[name] != "" {
 		return uri, nil
@@ -152,8 +140,8 @@ func GetStorageAccountURI(bslCfg map[string]string, credFile string) (string, er
 	return *properties.Account.Properties.PrimaryEndpoints.Blob, nil
 }
 
-// try to get the storage account access key with the provided credentials
-func getStorageAccountAccessKey(bslCfg, creds map[string]string) (string, error) {
+// try to exchange the storage account access key with the provided credentials
+func exchangeStorageAccountAccessKey(bslCfg, creds map[string]string) (string, error) {
 	client, err := newStorageAccountClient(bslCfg, creds)
 	if err != nil {
 		return "", err
@@ -161,11 +149,11 @@ func getStorageAccountAccessKey(bslCfg, creds map[string]string) (string, error)
 
 	resourceGroup := GetFromLocationConfigOrCredential(bslCfg, creds, BSLConfigResourceGroup, CredentialKeyResourceGroup)
 	if resourceGroup == "" {
-		return "", errors.New("resourceGroup is required")
+		return "", errors.New("resource group is required in BSL or credential to exchange the storage account access key")
 	}
 	storageAccount := bslCfg[BSLConfigStorageAccount]
 	if storageAccount == "" {
-		return "", errors.New("storageAccount is required in the BSL")
+		return "", errors.Errorf("%s is required in the BSL to exchange the storage account access key", BSLConfigStorageAccount)
 	}
 
 	expand := "kerb"
@@ -194,19 +182,19 @@ func newStorageAccountClient(bslCfg map[string]string, creds map[string]string) 
 
 	cred, err := NewCredential(creds, clientOptions)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to create Azure credential")
+		return nil, errors.WithMessage(err, "failed to create Azure AD credential")
 	}
 
 	subID := GetFromLocationConfigOrCredential(bslCfg, creds, BSLConfigSubscriptionID, CredentialKeySubscriptionID)
 	if subID == "" {
-		return nil, errors.New("subscription ID is required")
+		return nil, errors.New("subscription ID is required in BSL or credential to create the storage account client")
 	}
 
 	client, err := armstorage.NewAccountsClient(subID, cred, &arm.ClientOptions{
 		ClientOptions: clientOptions,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create storage account client")
+		return nil, errors.Wrap(err, "failed to create the storage account client")
 	}
 
 	return client, nil

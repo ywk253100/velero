@@ -25,13 +25,20 @@ import (
 // GetAzureResticEnvVars gets the environment variables that restic
 // relies on (AZURE_ACCOUNT_NAME and AZURE_ACCOUNT_KEY) based
 // on info in the provided object storage location config map.
-func GetAzureResticEnvVars(bslCfg map[string]string, credFile string) (map[string]string, error) {
-	storageAccount := bslCfg[azure.BSLConfigStorageAccount]
+func GetAzureResticEnvVars(config map[string]string) (map[string]string, error) {
+	storageAccount := config[azure.BSLConfigStorageAccount]
 	if storageAccount == "" {
 		return nil, errors.New("storageAccount is required in the BSL")
 	}
 
-	credentials, err := azure.GetStorageAccountCredentials(bslCfg, credFile, false)
+	creds, err := azure.LoadCredentials(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// restic doesn't support Azure AD, set it as false
+	config[azure.BSLConfigUseAAD] = "false"
+	credentials, err := azure.GetStorageAccountCredentials(config, creds)
 	if err != nil {
 		return nil, err
 	}

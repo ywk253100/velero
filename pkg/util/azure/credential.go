@@ -27,24 +27,24 @@ import (
 )
 
 // NewCredential chains the config credential and workload identity credential
-func NewCredential(config map[string]string, options policy.ClientOptions) (azcore.TokenCredential, error) {
+func NewCredential(creds map[string]string, options policy.ClientOptions) (azcore.TokenCredential, error) {
 	var (
-		creds   []azcore.TokenCredential
-		errMsgs []string
+		credential []azcore.TokenCredential
+		errMsgs    []string
 	)
 
 	additionalTenants := []string{}
-	if tenants := config[CredentialKeyAdditionallyAllowedTenants]; tenants != "" {
+	if tenants := creds[CredentialKeyAdditionallyAllowedTenants]; tenants != "" {
 		additionalTenants = strings.Split(tenants, ";")
 	}
 
 	// config credential
-	cfgCred, err := newConfigCredential(config, configCredentialOptions{
+	cfgCred, err := newConfigCredential(creds, configCredentialOptions{
 		ClientOptions:              options,
 		AdditionallyAllowedTenants: additionalTenants,
 	})
 	if err == nil {
-		creds = append(creds, cfgCred)
+		credential = append(credential, cfgCred)
 	} else {
 		errMsgs = append(errMsgs, err.Error())
 	}
@@ -55,16 +55,16 @@ func NewCredential(config map[string]string, options policy.ClientOptions) (azco
 		ClientOptions:              options,
 	})
 	if err == nil {
-		creds = append(creds, wic)
+		credential = append(credential, wic)
 	} else {
 		errMsgs = append(errMsgs, err.Error())
 	}
 
-	if len(creds) == 0 {
+	if len(credential) == 0 {
 		return nil, errors.Errorf("failed to create Azure credential: %s", strings.Join(errMsgs, "\n\t"))
 	}
 
-	return azidentity.NewChainedTokenCredential(creds, nil)
+	return azidentity.NewChainedTokenCredential(credential, nil)
 }
 
 type configCredentialOptions struct {
@@ -75,18 +75,18 @@ type configCredentialOptions struct {
 // newConfigCredential works same as the azidentity.EnvironmentCredential but reads the credentials from a map
 // rather than environment variables. This is required for Velero to run B/R concurrently
 // https://github.com/Azure/azure-sdk-for-go/blob/sdk/azidentity/v1.3.0/sdk/azidentity/environment_credential.go#L80
-func newConfigCredential(config map[string]string, options configCredentialOptions) (azcore.TokenCredential, error) {
-	tenantID := config[CredentialKeyTenantID]
+func newConfigCredential(creds map[string]string, options configCredentialOptions) (azcore.TokenCredential, error) {
+	tenantID := creds[CredentialKeyTenantID]
 	if tenantID == "" {
 		return nil, errors.Errorf("%s is required", CredentialKeyTenantID)
 	}
-	clientID := config[CredentialKeyClientID]
+	clientID := creds[CredentialKeyClientID]
 	if clientID == "" {
 		return nil, errors.Errorf("%s is required", CredentialKeyClientID)
 	}
 
 	// client secret
-	if clientSecret := config[CredentialKeyClientSecret]; clientSecret != "" {
+	if clientSecret := creds[CredentialKeyClientSecret]; clientSecret != "" {
 		return azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &azidentity.ClientSecretCredentialOptions{
 			AdditionallyAllowedTenants: options.AdditionallyAllowedTenants,
 			ClientOptions:              options.ClientOptions,
@@ -94,13 +94,13 @@ func newConfigCredential(config map[string]string, options configCredentialOptio
 	}
 
 	// certiticate
-	if certPath := config[CredentialKeyClientCertificatePath]; certPath != "" {
+	if certPath := creds[CredentialKeyClientCertificatePath]; certPath != "" {
 		certData, err := os.ReadFile(certPath)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read certificate file %s", certPath)
 		}
 		var password []byte
-		if v := config[CredentialKeyClientCertificatePassword]; v != "" {
+		if v := creds[CredentialKeyClientCertificatePassword]; v != "" {
 			password = []byte(v)
 		}
 		certs, key, err := azidentity.ParseCertificates(certData, password)
@@ -111,15 +111,15 @@ func newConfigCredential(config map[string]string, options configCredentialOptio
 			AdditionallyAllowedTenants: options.AdditionallyAllowedTenants,
 			ClientOptions:              options.ClientOptions,
 		}
-		if v, ok := config[CredentialKeySendCertChain]; ok {
+		if v, ok := creds[CredentialKeySendCertChain]; ok {
 			o.SendCertificateChain = v == "1" || strings.ToLower(v) == "true"
 		}
 		return azidentity.NewClientCertificateCredential(tenantID, clientID, certs, key, o)
 	}
 
 	// username/password
-	if username := config[CredentialKeyUsername]; username != "" {
-		if password := config[CredentialKeyPassword]; password != "" {
+	if username := creds[CredentialKeyUsername]; username != "" {
+		if password := creds[CredentialKeyPassword]; password != "" {
 			return azidentity.NewUsernamePasswordCredential(tenantID, clientID, username, password,
 				&azidentity.UsernamePasswordCredentialOptions{
 					AdditionallyAllowedTenants: options.AdditionallyAllowedTenants,

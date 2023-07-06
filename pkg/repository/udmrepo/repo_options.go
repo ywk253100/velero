@@ -44,10 +44,6 @@ const (
 	StoreOptionS3DisableTLSVerify = "skipTLSVerify"
 	StoreOptionS3CustomCA         = "customCA"
 
-	StoreOptionAzureDomain         = "storageDomain"
-	StoreOptionAzureStorageAccount = "storageAccount"
-	StoreOptionAzureToken          = "sasToken"
-
 	StoreOptionFsPath = "fspath"
 
 	StoreOptionGcsReadonly = "readonly"

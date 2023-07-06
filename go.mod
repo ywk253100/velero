@@ -166,4 +166,6 @@ require (
 )
 
 // TODO replace it once the kopia release new version
-replace github.com/kopia/kopia => github.com/ywk253100/kopia v0.1.0
+replace github.com/kopia/kopia => github.com/ywk253100/kopia v0.2.0
+
+//replace github.com/kopia/kopia => ../../kopia/kopia

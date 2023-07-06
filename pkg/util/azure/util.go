@@ -41,15 +41,21 @@ const (
 	CredentialKeySendCertChain              = "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN"
 	CredentialKeyUsername                   = "AZURE_USERNAME"
 	CredentialKeyPassword                   = "AZURE_PASSWORD"
+
+	credentialFile = "credentialsFile"
 )
 
-// LoadCredentials loads the credential file into a map
-func LoadCredentials(credFile string) (map[string]string, error) {
-	// if the credential isn't specified in the BSL spec, use the default credential
-	if credFile == "" {
-		credFile = os.Getenv("AZURE_CREDENTIALS_FILE")
+// LoadCredentials gets the credential file from config and loads it into a map
+func LoadCredentials(config map[string]string) (map[string]string, error) {
+	// the default credential file
+	credFile := os.Getenv("AZURE_CREDENTIALS_FILE")
+
+	// use the credential file specified in the BSL spec if provided
+	if config[credentialFile] != "" {
+		credFile = config[credentialFile]
 	}
-	// read the credentials from file and put into a map
+
+	// put the credential file content into a map
 	creds, err := godotenv.Read(credFile)
 	if err != nil {
 		return nil, errors.Errorf("failed to read credentials from file %s", credFile)
@@ -59,7 +65,7 @@ func LoadCredentials(credFile string) (map[string]string, error) {
 
 // GetClientOptions returns the client options based on the cloud name
 func GetClientOptions(cloudName string) (policy.ClientOptions, error) {
-	cloudCfg, err := GetCloudConfiguration(cloudName)
+	cloudCfg, err := getCloudConfiguration(cloudName)
 	if err != nil {
 		return policy.ClientOptions{}, err
 	}
@@ -68,8 +74,8 @@ func GetClientOptions(cloudName string) (policy.ClientOptions, error) {
 	}, nil
 }
 
-// GetCloudConfiguration based on the cloud name
-func GetCloudConfiguration(name string) (cloud.Configuration, error) {
+// getCloudConfiguration based on the cloud name
+func getCloudConfiguration(name string) (cloud.Configuration, error) {
 	switch name {
 	case "", "AZURECLOUD", "AZUREPUBLICCLOUD":
 		return cloud.AzurePublic, nil
