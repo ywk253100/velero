@@ -24,17 +24,17 @@ import (
 )
 
 type AzureBackend struct {
-	Option *azure.Option
+	option azure.Option
 }
 
 func (c *AzureBackend) Setup(ctx context.Context, flags map[string]string) error {
-	option := &azure.Option{}
-	option.Config = flags
-	option.Limits = setupLimits(ctx, flags)
-	c.Option = option
+	c.option = azure.Option{
+		Config: flags,
+		Limits: setupLimits(ctx, flags),
+	}
 	return nil
 }
 
 func (c *AzureBackend) Connect(ctx context.Context, isCreate bool) (blob.Storage, error) {
-	return azure.NewStorage(ctx, c.Option, false)
+	return azure.NewStorage(ctx, &c.option, false)
 }
