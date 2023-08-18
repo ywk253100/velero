@@ -28,6 +28,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -58,7 +59,7 @@ func init() {
 // NewStorageClient creates a blob storage client(data plane) with the provided config which contains BSL config and the credential file name.
 // The returned azblob.SharedKeyCredential is needed for Azure plugin to generate the SAS URL when auth with storage
 // account access key
-func NewStorageClient(config map[string]string) (*azblob.Client, *azblob.SharedKeyCredential, error) {
+func NewStorageClient(log logrus.FieldLogger, config map[string]string) (*azblob.Client, *azblob.SharedKeyCredential, error) {
 	// rename to bslCfg for easy understanding
 	bslCfg := config
 
@@ -80,7 +81,7 @@ func NewStorageClient(config map[string]string) (*azblob.Client, *azblob.SharedK
 	}
 
 	// get the storage account URI
-	uri, err := getStorageAccountURI(bslCfg, creds)
+	uri, err := getStorageAccountURI(log, bslCfg, creds)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,6 +97,7 @@ func NewStorageClient(config map[string]string) (*azblob.Client, *azblob.SharedK
 	// auth with storage account access key
 	accessKey := creds[CredentialKeyStorageAccountAccessKey]
 	if accessKey != "" {
+		log.Info("auth with the storage account access key")
 		cred, err := azblob.NewSharedKeyCredential(storageAccount, accessKey)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create storage account access key credential")
@@ -108,6 +110,7 @@ func NewStorageClient(config map[string]string) (*azblob.Client, *azblob.SharedK
 	}
 
 	// auth with Azure AD
+	log.Info("auth with Azure AD")
 	cred, err := NewCredential(creds, clientOptions)
 	if err != nil {
 		return nil, nil, err
@@ -162,10 +165,11 @@ func GetStorageAccountCredentials(bslCfg map[string]string, creds map[string]str
 // 1. Return the storage account URI directly if it is specified in BSL config
 // 2. Try to call Azure API to get the storage account URI if possible(Backgroud: https://github.com/vmware-tanzu/velero/issues/6163)
 // 3. Fall back to return the default URI
-func getStorageAccountURI(bslCfg map[string]string, creds map[string]string) (string, error) {
+func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, creds map[string]string) (string, error) {
 	// if the URI is specified in the BSL, return it directly
 	endpoint := bslCfg[BSLConfigStorageAccountURI]
 	if endpoint != "" {
+		log.Infof("the storage account URI %q is specified in the BSL, use it direclty", endpoint)
 		return endpoint, nil
 	}
 
@@ -182,6 +186,7 @@ func getStorageAccountURI(bslCfg map[string]string, creds map[string]string) (st
 	// the storage account access key cannot be used to get the storage account properties,
 	// so fallback to the default URI
 	if name := bslCfg[BSLConfigStorageAccountAccessKeyName]; name != "" && creds[name] != "" {
+		log.Infof("auth with the storage account access key, cannot retrive the storage account properties, fallback to use the default URI %q", endpoint)
 		return uri, nil
 	}
 
@@ -193,16 +198,20 @@ func getStorageAccountURI(bslCfg map[string]string, creds map[string]string) (st
 	resourceGroup := GetFromLocationConfigOrCredential(bslCfg, creds, BSLConfigResourceGroup, CredentialKeyResourceGroup)
 	// we cannot get the storage account properties without the resource group, so fallback to the default URI
 	if resourceGroup == "" {
+		log.Infof("resource group isn't set which is required to retrive the storage account properties, fallback to use the default URI %q", endpoint)
 		return uri, nil
 	}
 
 	properties, err := client.GetProperties(context.Background(), resourceGroup, storageAccount, nil)
 	// get error, fallback to the default URI
 	if err != nil {
+		log.Infof("failed to retrive the storage account properties: %v, fallback to use the default URI %q", err, endpoint)
 		return uri, nil
 	}
 
-	return *properties.Account.Properties.PrimaryEndpoints.Blob, nil
+	endpoint = *properties.Account.Properties.PrimaryEndpoints.Blob
+	log.Infof("use the storage account URI retrived from the storage account properties %q", endpoint)
+	return endpoint, nil
 }
 
 // try to exchange the storage account access key with the provided credentials
