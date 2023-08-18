@@ -188,6 +188,7 @@ func (urp *unifiedRepoProvider) PrepareRepo(ctx context.Context, param RepoParam
 		log.Debug("Repo has already been initialized remotely")
 		return nil
 	}
+	log.Infof("failed to connect to the repo: %v, will try to create it", err)
 
 	err = urp.repoService.Init(ctx, *repoOption, true)
 	if err != nil {
