@@ -52,7 +52,7 @@ func init() {
 		Endpoint: "blob.core.usgovcloudapi.net",
 	}
 	cloud.AzurePublic.Services[serviceNameBlob] = cloud.ServiceConfiguration{
-		Endpoint: "blob.core.windows.net/",
+		Endpoint: "blob.core.windows.net",
 	}
 }
 
@@ -167,10 +167,10 @@ func GetStorageAccountCredentials(bslCfg map[string]string, creds map[string]str
 // 3. Fall back to return the default URI
 func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, creds map[string]string) (string, error) {
 	// if the URI is specified in the BSL, return it directly
-	endpoint := bslCfg[BSLConfigStorageAccountURI]
-	if endpoint != "" {
-		log.Infof("the storage account URI %q is specified in the BSL, use it direclty", endpoint)
-		return endpoint, nil
+	uri := bslCfg[BSLConfigStorageAccountURI]
+	if uri != "" {
+		log.Infof("the storage account URI %q is specified in the BSL, use it direclty", uri)
+		return uri, nil
 	}
 
 	storageAccount := bslCfg[BSLConfigStorageAccount]
@@ -181,12 +181,12 @@ func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, cred
 	}
 
 	// the default URI
-	uri := fmt.Sprintf("https://%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob])
+	uri = fmt.Sprintf("https://%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob])
 
 	// the storage account access key cannot be used to get the storage account properties,
 	// so fallback to the default URI
 	if name := bslCfg[BSLConfigStorageAccountAccessKeyName]; name != "" && creds[name] != "" {
-		log.Infof("auth with the storage account access key, cannot retrive the storage account properties, fallback to use the default URI %q", endpoint)
+		log.Infof("auth with the storage account access key, cannot retrive the storage account properties, fallback to use the default URI %q", uri)
 		return uri, nil
 	}
 
@@ -198,20 +198,20 @@ func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, cred
 	resourceGroup := GetFromLocationConfigOrCredential(bslCfg, creds, BSLConfigResourceGroup, CredentialKeyResourceGroup)
 	// we cannot get the storage account properties without the resource group, so fallback to the default URI
 	if resourceGroup == "" {
-		log.Infof("resource group isn't set which is required to retrive the storage account properties, fallback to use the default URI %q", endpoint)
+		log.Infof("resource group isn't set which is required to retrive the storage account properties, fallback to use the default URI %q", uri)
 		return uri, nil
 	}
 
 	properties, err := client.GetProperties(context.Background(), resourceGroup, storageAccount, nil)
 	// get error, fallback to the default URI
 	if err != nil {
-		log.Infof("failed to retrive the storage account properties: %v, fallback to use the default URI %q", err, endpoint)
+		log.Infof("failed to retrive the storage account properties: %v, fallback to use the default URI %q", err, uri)
 		return uri, nil
 	}
 
-	endpoint = *properties.Account.Properties.PrimaryEndpoints.Blob
-	log.Infof("use the storage account URI retrived from the storage account properties %q", endpoint)
-	return endpoint, nil
+	uri = *properties.Account.Properties.PrimaryEndpoints.Blob
+	log.Infof("use the storage account URI retrived from the storage account properties %q", uri)
+	return uri, nil
 }
 
 // try to exchange the storage account access key with the provided credentials

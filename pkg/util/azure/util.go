@@ -19,6 +19,7 @@ package azure
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
@@ -76,7 +77,7 @@ func GetClientOptions(cloudName string) (policy.ClientOptions, error) {
 
 // getCloudConfiguration based on the cloud name
 func getCloudConfiguration(name string) (cloud.Configuration, error) {
-	switch name {
+	switch strings.ToUpper(name) {
 	case "", "AZURECLOUD", "AZUREPUBLICCLOUD":
 		return cloud.AzurePublic, nil
 	case "AZURECHINACLOUD":
