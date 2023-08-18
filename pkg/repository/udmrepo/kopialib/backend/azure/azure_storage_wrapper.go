@@ -34,19 +34,19 @@ func init() {
 }
 
 type Option struct {
-	Config map[string]string
+	Config map[string]string `json:"config"     kopia:"sensitive"`
 	Limits throttling.Limits
 }
 
 type Storage struct {
 	*azStorage
-	config map[string]string
+	Option *Option
 }
 
 func (s *Storage) ConnectionInfo() blob.ConnectionInfo {
 	return blob.ConnectionInfo{
 		Type:   storageType,
-		Config: s.config,
+		Config: s.Option,
 	}
 }
 
@@ -59,7 +59,7 @@ func NewStorage(ctx context.Context, option *Option, isCreate bool) (blob.Storag
 	}
 
 	storage := &Storage{
-		config: cfg,
+		Option: option,
 		azStorage: &azStorage{
 			Options: Options{
 				Container: cfg[udmrepo.StoreOptionOssBucket],
