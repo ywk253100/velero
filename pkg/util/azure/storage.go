@@ -181,7 +181,7 @@ func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, cred
 	}
 
 	// the default URI
-	uri = fmt.Sprintf("https://%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob])
+	uri = fmt.Sprintf("https://%s.%s", storageAccount, cloudCfg.Services[serviceNameBlob].Endpoint)
 
 	// the storage account access key cannot be used to get the storage account properties,
 	// so fallback to the default URI
