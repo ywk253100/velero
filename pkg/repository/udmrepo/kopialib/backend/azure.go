@@ -18,9 +18,12 @@ package backend
 
 import (
 	"context"
+	"encoding/base64"
 
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/pkg/errors"
 
+	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/azure"
 )
 
@@ -29,6 +32,16 @@ type AzureBackend struct {
 }
 
 func (c *AzureBackend) Setup(ctx context.Context, flags map[string]string) error {
+	// As pkg/util/azure.NewStorageClient(config) is used in both repository and plugin,
+	// the caCert isn't encoded when passing to the plugin, so we need to decode the caCert
+	// before passing the config into the NewStorageClient()
+	if flags[udmrepo.StoreOptionCACert] != "" {
+		caCert, err := base64.StdEncoding.DecodeString(flags[udmrepo.StoreOptionCACert])
+		if err != nil {
+			return errors.Wrapf(err, "failed to decode the CA cert")
+		}
+		flags[udmrepo.StoreOptionCACert] = string(caCert)
+	}
 	c.option = azure.Option{
 		Config: flags,
 		Limits: setupLimits(ctx, flags),
