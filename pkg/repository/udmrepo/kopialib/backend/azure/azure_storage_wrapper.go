@@ -23,6 +23,7 @@ import (
 	"github.com/kopia/kopia/repo/blob/throttling"
 	"github.com/sirupsen/logrus"
 
+	"github.com/kopia/kopia/repo/blob/azure"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	azureutil "github.com/vmware-tanzu/velero/pkg/util/azure"
 )
@@ -41,7 +42,7 @@ type Option struct {
 }
 
 type Storage struct {
-	*azStorage
+	blob.Storage
 	Option *Option
 }
 
@@ -60,17 +61,18 @@ func NewStorage(ctx context.Context, option *Option, isCreate bool) (blob.Storag
 		return nil, err
 	}
 
-	storage := &Storage{
-		Option: option,
-		azStorage: &azStorage{
-			Options: Options{
-				Container: cfg[udmrepo.StoreOptionOssBucket],
-				Prefix:    cfg[udmrepo.StoreOptionPrefix],
-				Limits:    option.Limits,
-			},
-			container: cfg[udmrepo.StoreOptionOssBucket],
-			service:   client,
-		},
+	opt := &azure.Options{
+		Container: cfg[udmrepo.StoreOptionOssBucket],
+		Prefix:    cfg[udmrepo.StoreOptionPrefix],
+		Limits:    option.Limits,
 	}
-	return storage, nil
+	azStorage, err := azure.NewWithClient(ctx, opt, client)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Storage{
+		Option:  option,
+		Storage: azStorage,
+	}, nil
 }
