@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -349,7 +349,7 @@ func (b *backupSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Filter all BSL events, because this controller is supposed to run periodically, not by event.
 		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(kube.FalsePredicate{})).
-		Watches(backupSyncSource, nil, builder.WithPredicates(gp)).
+		WatchesRawSource(backupSyncSource, nil, builder.WithPredicates(gp)).
 		Complete(b)
 }
 

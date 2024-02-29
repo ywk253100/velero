@@ -27,7 +27,7 @@ import (
 	"time"
 
 	logrusr "github.com/bombsimon/logrusr/v3"
-	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -47,6 +47,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -350,8 +351,12 @@ func newServer(f client.Factory, config serverConfig, logger *logrus.Logger) (*s
 	ctrl.SetLogger(logrusr.New(logger))
 
 	mgr, err := ctrl.NewManager(clientConfig, ctrl.Options{
-		Scheme:    scheme,
-		Namespace: f.Namespace(),
+		Scheme: scheme,
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				f.Namespace(): {},
+			},
+		},
 	})
 	if err != nil {
 		cancelFunc()
