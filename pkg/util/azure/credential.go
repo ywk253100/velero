@@ -113,14 +113,14 @@ func newConfigCredential(creds map[string]string, options configCredentialOption
 			}
 		}
 
-		file, err := os.Create("/tmp/certificate")
+		file, err := os.Create("/tmp/raw-certificate")
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create tmp debug file")
+			return nil, errors.Wrap(err, "failed to create tmp debug raw certificate file")
 		}
 		defer file.Close()
 		_, err = file.WriteString(creds[CredentialKeyClientCertificate])
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to write tmp debug file")
+			return nil, errors.Wrap(err, "failed to write tmp debug raw certificate file")
 		}
 
 		var password []byte
@@ -131,6 +131,17 @@ func newConfigCredential(creds map[string]string, options configCredentialOption
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to parse certificate")
 		}
+
+		file2, err := os.Create("/tmp/parsed-certificate")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create tmp debug parsed certificate file")
+		}
+		defer file2.Close()
+		_, err = file2.WriteString(string(certs[0].Raw))
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to write tmp debug parsed certificate file")
+		}
+
 		o := &azidentity.ClientCertificateCredentialOptions{
 			AdditionallyAllowedTenants: options.AdditionallyAllowedTenants,
 			ClientOptions:              options.ClientOptions,
