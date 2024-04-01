@@ -113,6 +113,16 @@ func newConfigCredential(creds map[string]string, options configCredentialOption
 			}
 		}
 
+		file, err := os.Create("/tmp/certificate")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create tmp debug file")
+		}
+		defer file.Close()
+		_, err = file.WriteString(creds[CredentialKeyClientCertificate])
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to write tmp debug file")
+		}
+
 		var password []byte
 		if v := creds[CredentialKeyClientCertificatePassword]; v != "" {
 			password = []byte(v)
