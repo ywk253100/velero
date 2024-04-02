@@ -184,12 +184,16 @@ func (c *credentialError) Error() string {
 	return fmt.Sprintf("%s: %s", c.credType, c.err.Error())
 }
 
+func (c *credentialError) As(interface{}) bool {
+	return true
+}
+
 // credentialErrorReporter is a substitute for credentials that couldn't be constructed.
 // Its GetToken method always returns an error having the same message as
 // the error that prevented constructing the credential. This ensures the message is present
 // in the error returned by ChainedTokenCredential.GetToken()
 type credentialErrorReporter struct {
-	err error
+	err *credentialError
 }
 
 func (c *credentialErrorReporter) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
