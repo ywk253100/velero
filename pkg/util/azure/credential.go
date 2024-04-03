@@ -81,7 +81,7 @@ func NewCredential(creds map[string]string, options policy.ClientOptions) (azcor
 		return nil, errors.Errorf("failed to create Azure credential: %s", strings.Join(errMsgs, "\n\t"))
 	}
 
-	return azidentity.NewChainedTokenCredential(credential, nil)
+	return NewChainedTokenCredential(credential, nil)
 }
 
 type configCredentialOptions struct {
