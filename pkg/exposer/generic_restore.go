@@ -43,6 +43,8 @@ type GenericRestoreExposeParam struct {
 	// TargetPVCName is the target volume name to be restored
 	TargetPVCName string
 
+	TargetPVName string
+
 	// TargetNamespace is the namespace of the volume to be restored
 	TargetNamespace string
 
@@ -196,7 +198,7 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		}
 	}
 
-	restorePVC, err := e.createRestorePVC(ctx, ownerObject, targetPVC, selectedNode, param.DataMover)
+	restorePVC, err := e.createRestorePVC(ctx, ownerObject, targetPVC, selectedNode, param.DataMover, param.TargetPVName)
 	if err != nil {
 		return errors.Wrap(err, "error to create restore pvc")
 	}
@@ -806,7 +808,7 @@ func (e *genericRestoreExposer) createRestorePod(
 	return e.kubeClient.CoreV1().Pods(ownerObject.Namespace).Create(ctx, pod, metav1.CreateOptions{})
 }
 
-func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObject corev1api.ObjectReference, targetPVC *corev1api.PersistentVolumeClaim, selectedNode string, dataMover string) (*corev1api.PersistentVolumeClaim, error) {
+func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObject corev1api.ObjectReference, targetPVC *corev1api.PersistentVolumeClaim, selectedNode string, dataMover string, targetPVName string) (*corev1api.PersistentVolumeClaim, error) {
 	restorePVCName := ownerObject.Name
 
 	pvcObj := &corev1api.PersistentVolumeClaim{
@@ -837,6 +839,9 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 		pvcObj.Annotations = map[string]string{
 			kube.KubeAnnSelectedNode: selectedNode,
 		}
+	}
+	if targetPVName != "" {
+		pvcObj.Spec.VolumeName = targetPVName
 	}
 
 	if dataMover == datamover.DataMoverTypeVeleroBlock {

@@ -287,6 +287,7 @@ func newPodVolumeRestore(restore *velerov1api.Restore, pod *corev1api.Pod, backu
 			RepoIdentifier:        repoIdentifier,
 			UploaderType:          uploaderType,
 			SourceNamespace:       sourceNamespace,
+			Incremental:           restore.Spec.ExistingVolumeDataPolicy == velerov1api.VolumeDataPolicyTypeIncremental,
 		},
 	}
 	if pvc != nil {

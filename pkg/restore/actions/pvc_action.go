@@ -100,7 +100,8 @@ func (p *PVCAction) Execute(input *velero.RestoreItemActionExecuteInput) (*veler
 			AnnBoundByController,
 			AnnStorageProvisioner,
 			AnnBetaStorageProvisioner,
-			AnnSelectedNode,
+			// TODO don't clear selected node annotation for in-place restore
+			//AnnSelectedNode,
 			velerov1api.VolumeSnapshotLabel,
 			velerov1api.DataUploadNameAnnotation,
 		},

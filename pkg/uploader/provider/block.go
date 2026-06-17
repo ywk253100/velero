@@ -160,6 +160,7 @@ func (bp *blockProvider) RunRestore(
 	snapshotID string,
 	volumePath string,
 	volMode uploader.PersistentVolumeMode,
+	incremental bool,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (int64, error) {
 	if updater == nil {

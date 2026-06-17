@@ -65,6 +65,7 @@ type Provider interface {
 		snapshotID string,
 		volumePath string,
 		volMode uploader.PersistentVolumeMode,
+		incremental bool, // TODO move the incremental to the uploaderConfig map[string]string because not all of them apply to all providers
 		uploaderConfig map[string]string,
 		updater uploader.ProgressUpdater) (int64, error)
 	// Close which will close related repository

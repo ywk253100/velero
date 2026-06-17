@@ -454,7 +454,7 @@ func (r *DataDownloadReconciler) startCancelableDataPath(asyncBR datapath.AsyncB
 
 	if err := asyncBR.StartRestore(dd.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, dd.Spec.DataMoverConfig); err != nil {
+	}, dd.Spec.Incremental, dd.Spec.DataMoverConfig); err != nil {
 		return errors.Wrapf(err, "error starting async restore for pod %s, volume %s", res.ByPod.HostingPod.Name, res.ByPod.VolumeName)
 	}
 
@@ -936,6 +936,7 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 
 	return exposer.GenericRestoreExposeParam{
 		TargetPVCName:         dd.Spec.TargetVolume.PVC,
+		TargetPVName:          dd.Spec.TargetVolume.PV,
 		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
 		HostingPodLabels:      hostingPodLabels,
 		HostingPodAnnotations: hostingPodAnnotation,
@@ -1096,7 +1097,7 @@ func (r *DataDownloadReconciler) resumeCancellableDataPath(ctx context.Context, 
 
 	if err := asyncBR.StartRestore(dd.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, nil); err != nil {
+	}, dd.Spec.Incremental, nil); err != nil {
 		return errors.Wrapf(err, "error to resume asyncBR watcher for dd %s", dd.Name)
 	}
 

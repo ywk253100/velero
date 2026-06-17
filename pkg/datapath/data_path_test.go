@@ -190,7 +190,7 @@ func TestAsyncRestore(t *testing.T) {
 			dp.initialized = true
 			dp.callbacks = test.callbacks
 
-			err := dp.StartRestore(test.snapshot, AccessPoint{ByPath: test.path}, map[string]string{})
+			err := dp.StartRestore(test.snapshot, AccessPoint{ByPath: test.path}, false, map[string]string{})
 			require.NoError(t, err)
 
 			<-finish

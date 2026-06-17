@@ -81,6 +81,30 @@ spec:
                   Cancel indicates request to cancel the ongoing DataDownload. It can be set
                   when the DataDownload is in InProgress phase
                 type: boolean
+              csiSnapshot:
+                description: CSISnapshot provides the information of the CSI snapshot
+                  used to do the incremental restore.
+                nullable: true
+                properties:
+                  driver:
+                    description: Driver is the driver used by the VolumeSnapshotContent
+                    type: string
+                  snapshotClass:
+                    description: SnapshotClass is the name of the snapshot class that
+                      the volume snapshot is created with
+                    type: string
+                  storageClass:
+                    description: StorageClass is the name of the storage class of
+                      the PVC that the volume snapshot is created from
+                    type: string
+                  volumeSnapshot:
+                    description: VolumeSnapshot is the name of the volume snapshot
+                      to be backed up
+                    type: string
+                required:
+                - storageClass
+                - volumeSnapshot
+                type: object
               dataMoverConfig:
                 additionalProperties:
                   type: string
@@ -92,6 +116,9 @@ spec:
                   DataMover specifies the data mover to be used by the backup.
                   If DataMover is "" or "velero", the built-in data mover will be used.
                 type: string
+              incremental:
+                description: Incremental indicates whether the restore is incremental.
+                type: boolean
               nodeOS:
                 description: NodeOS is OS of the node where the DataDownload is processed.
                 enum:

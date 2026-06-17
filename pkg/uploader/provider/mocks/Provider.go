@@ -223,8 +223,8 @@ func (_c *Provider_RunBackup_Call) RunAndReturn(run func(ctx context.Context, pa
 }
 
 // RunRestore provides a mock function for the type Provider
-func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volumePath string, volMode uploader.PersistentVolumeMode, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, error) {
-	ret := _mock.Called(ctx, snapshotID, volumePath, volMode, uploaderConfig, updater)
+func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volumePath string, volMode uploader.PersistentVolumeMode, incremental bool, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, error) {
+	ret := _mock.Called(ctx, snapshotID, volumePath, volMode, incremental, uploaderConfig, updater)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RunRestore")

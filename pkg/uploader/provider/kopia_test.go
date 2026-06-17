@@ -119,20 +119,20 @@ func TestRunBackup(t *testing.T) {
 func TestRunRestore(t *testing.T) {
 	testCases := []struct {
 		name            string
-		hookRestoreFunc func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error)
+		hookRestoreFunc func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, incremental bool, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error)
 		notError        bool
 		volMode         uploader.PersistentVolumeMode
 	}{
 		{
 			name: "normal restore",
-			hookRestoreFunc: func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
+			hookRestoreFunc: func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, incremental bool, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
 				return 0, 0, nil
 			},
 			notError: true,
 		},
 		{
 			name: "normal block mode restore",
-			hookRestoreFunc: func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
+			hookRestoreFunc: func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, incremental bool, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
 				return 0, 0, nil
 			},
 			volMode:  uploader.PersistentVolumeBlock,
@@ -157,7 +157,7 @@ func TestRunRestore(t *testing.T) {
 				tc.volMode = uploader.PersistentVolumeFilesystem
 			}
 			kopiaRestoreFunc = tc.hookRestoreFunc
-			_, err := kp.RunRestore(t.Context(), "", "/var", tc.volMode, map[string]string{}, &updater)
+			_, err := kp.RunRestore(t.Context(), "", "/var", tc.volMode, false, map[string]string{}, &updater)
 			if tc.notError {
 				assert.NoError(t, err)
 			} else {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestIsResourcePolicyValid(t *testing.T) {
-	require.True(t, IsResourcePolicyValid(string(velerov1api.PolicyTypeNone)))
-	require.True(t, IsResourcePolicyValid(string(velerov1api.PolicyTypeUpdate)))
+	require.True(t, IsResourcePolicyValid(string(velerov1api.ResourcePolicyTypeNone)))
+	require.True(t, IsResourcePolicyValid(string(velerov1api.ResourcePolicyTypeUpdate)))
 	require.False(t, IsResourcePolicyValid(""))
 }

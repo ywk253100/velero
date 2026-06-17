@@ -389,9 +389,19 @@ func (o *fileSystemRestoreOutput) Terminate() error {
 }
 
 // Restore restore specific sourcePath with given snapshotID and update progress
-func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string,
-	log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
-	log.Info("Start to restore...")
+func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress, snapshotID, dest string, volMode uploader.PersistentVolumeMode, incremental bool,
+	uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
+
+	deleteExtra := false
+	if len(uploaderCfg) > 0 {
+		var err error
+		deleteExtra, err = uploaderutil.GetDeleteExtraFiles(uploaderCfg)
+		if err != nil {
+			return 0, 0, errors.Wrap(err, "failed to get delete extra files config")
+		}
+	}
+
+	log.Infof("Start to restore incremental %v, deleteExtra %v ...", incremental, deleteExtra)
 
 	kopiaCtx := kopia.SetupKopiaLog(ctx, log)
 
@@ -448,14 +458,23 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 	}
 
 	var output RestoreOutput
+	var kopiaOutput restore.Output
+
+	// kopiaOutput is the output passed to Kopia's restore.Entry function.
+	// We must pass the unwrapped fsOutput (*restore.FilesystemOutput) directly for file system restores.
+	// This is because Kopia internally uses a strict type assertion (c.output.(*FilesystemOutput))
+	// to determine if it should execute the deleteExtra logic. If we pass the wrapped
+	// fileSystemRestoreOutput, the type assertion fails and extra files are not deleted.
 	if volMode == uploader.PersistentVolumeBlock {
 		output = &BlockOutput{
 			FilesystemOutput: fsOutput,
 		}
+		kopiaOutput = output
 	} else {
 		output = &fileSystemRestoreOutput{
 			FilesystemOutput: fsOutput,
 		}
+		kopiaOutput = fsOutput
 	}
 
 	defer func() {
@@ -464,8 +483,10 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 		}
 	}()
 
-	stat, err := restoreEntryFunc(kopiaCtx, rep, output, rootEntry, restore.Options{
+	stat, err := restoreEntryFunc(kopiaCtx, rep, kopiaOutput, rootEntry, restore.Options{
 		Parallel:               restoreConcurrency,
+		Incremental:            incremental,
+		DeleteExtra:            deleteExtra,
 		RestoreDirEntryAtDepth: math.MaxInt32,
 		Cancel:                 cancleCh,
 		ProgressCallback: func(ctx context.Context, stats restore.Stats) {

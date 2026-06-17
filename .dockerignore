@@ -1,3 +1,10 @@
 .go/
 .go.std/
 site/
+.cache/
+.vscode/
+_output/
+.git/
+kube.test
+.cursor/
+.idea/

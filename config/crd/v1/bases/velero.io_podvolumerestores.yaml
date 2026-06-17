@@ -83,6 +83,9 @@ spec:
                   Cancel indicates request to cancel the ongoing PodVolumeRestore. It can be set
                   when the PodVolumeRestore is in InProgress phase
                 type: boolean
+              incremental:
+                description: Incremental indicates whether the restore is incremental.
+                type: boolean
               pod:
                 description: Pod is a reference to the pod containing the volume to
                   be restored.

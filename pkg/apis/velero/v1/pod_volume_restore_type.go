@@ -55,6 +55,9 @@ type PodVolumeRestoreSpec struct {
 	// +nullable
 	UploaderSettings map[string]string `json:"uploaderSettings,omitempty"`
 
+	// Incremental indicates whether the restore is incremental.
+	Incremental bool `json:"incremental,omitempty"`
+
 	// Cancel indicates request to cancel the ongoing PodVolumeRestore. It can be set
 	// when the PodVolumeRestore is in InProgress phase
 	Cancel bool `json:"cancel,omitempty"`

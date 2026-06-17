@@ -98,7 +98,7 @@ func (b *RestoreBuilder) ExcludedResources(resources ...string) *RestoreBuilder 
 
 // ExistingResourcePolicy sets the Restore's resource policy.
 func (b *RestoreBuilder) ExistingResourcePolicy(policy string) *RestoreBuilder {
-	b.object.Spec.ExistingResourcePolicy = velerov1api.PolicyType(policy)
+	b.object.Spec.ExistingResourcePolicy = velerov1api.ResourcePolicyType(policy)
 	return b
 }
 

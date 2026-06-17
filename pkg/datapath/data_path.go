@@ -221,7 +221,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 	return nil
 }
 
-func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, incremental bool, uploaderConfigs map[string]string) error {
 	if !dp.initialized {
 		return errors.New("data path is not initialized")
 	}
@@ -236,7 +236,7 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			dp.wgDataPath.Done()
 		}()
 
-		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, target.VolMode, uploaderConfigs, dp)
+		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, target.VolMode, incremental, uploaderConfigs, dp)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)
