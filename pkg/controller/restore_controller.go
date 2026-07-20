@@ -365,6 +365,11 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingResourcePolicy: %s", restore.Spec.ExistingResourcePolicy))
 	}
 
+	// validate ExistingVolumeDataPolicy
+	if restore.Spec.ExistingVolumeDataPolicy != "" && !pkgrestoreUtil.IsVolumeDataPolicyValid(string(restore.Spec.ExistingVolumeDataPolicy)) {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingVolumeDataPolicy: %s", restore.Spec.ExistingVolumeDataPolicy))
+	}
+
 	// if ScheduleName is specified, fill in BackupName with the most recent successful backup from
 	// the schedule
 	if restore.Spec.ScheduleName != "" {

@@ -5,8 +5,11 @@ import (
 )
 
 func IsResourcePolicyValid(resourcePolicy string) bool {
-	if resourcePolicy == string(api.PolicyTypeNone) || resourcePolicy == string(api.PolicyTypeUpdate) {
-		return true
-	}
-	return false
+	return resourcePolicy == string(api.ResourcePolicyTypeNone) || resourcePolicy == string(api.ResourcePolicyTypeUpdate)
+}
+
+func IsVolumeDataPolicyValid(volumeDataPolicy string) bool {
+	return volumeDataPolicy == string(api.VolumeDataPolicyTypeNone) ||
+		volumeDataPolicy == string(api.VolumeDataPolicyTypeFull) ||
+		volumeDataPolicy == string(api.VolumeDataPolicyTypeIncremental)
 }
