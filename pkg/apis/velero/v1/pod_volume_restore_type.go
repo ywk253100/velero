@@ -46,6 +46,9 @@ type PodVolumeRestoreSpec struct {
 	// SnapshotID is the ID of the volume snapshot to be restored.
 	SnapshotID string `json:"snapshotID"`
 
+	// Incremental indicates whether the restore is incremental.
+	Incremental bool `json:"incremental"`
+
 	// SourceNamespace is the original namespace for namaspace mapping.
 	SourceNamespace string `json:"sourceNamespace"`
 

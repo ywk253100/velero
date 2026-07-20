@@ -39,6 +39,14 @@ type DataDownloadSpec struct {
 	// SnapshotID is the ID of the Velero backup snapshot to be restored from.
 	SnapshotID string `json:"snapshotID"`
 
+	// Incremental indicates whether the restore is incremental.
+	Incremental bool `json:"incremental"`
+
+	// CSISnapshot provides the information of the CSI snapshot used to do the incremental restore.
+	// +optional
+	// +nullable
+	CSISnapshot *CSISnapshotSpec `json:"csiSnapshot"`
+
 	// SourceNamespace is the original namespace where the volume is backed up from.
 	// It may be different from SourcePVC's namespace if namespace is remapped during restore.
 	SourceNamespace string `json:"sourceNamespace"`
