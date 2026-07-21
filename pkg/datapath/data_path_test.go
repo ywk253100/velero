@@ -184,13 +184,13 @@ func TestAsyncRestore(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dp := newGeneralDataPath("job-1", "test", nil, "velero", Callbacks{}, velerotest.NewLogger()).(*generalDataPath)
 			mockProvider := providerMock.NewProvider(t)
-			mockProvider.On("RunRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Restore.TotalBytes, test.err)
+			mockProvider.On("RunRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Restore.TotalBytes, test.err)
 			mockProvider.On("Close", mock.Anything).Return(nil)
 			dp.uploaderProv = mockProvider
 			dp.initialized = true
 			dp.callbacks = test.callbacks
 
-			err := dp.StartRestore(test.snapshot, AccessPoint{ByPath: test.path}, map[string]string{})
+			err := dp.StartRestore(test.snapshot, AccessPoint{ByPath: test.path}, map[string]string{}, &RestoreStartParam{})
 			require.NoError(t, err)
 
 			<-finish

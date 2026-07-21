@@ -59,6 +59,11 @@ type BackupStartParam struct {
 	SnapshotID     string
 }
 
+// RestoreStartParam define the input param for restore start
+type RestoreStartParam struct {
+	Incremental bool
+}
+
 type generalDataPath struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -221,12 +226,14 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 	return nil
 }
 
-func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string, param any) error {
 	if !dp.initialized {
 		return errors.New("data path is not initialized")
 	}
 
 	dp.wgDataPath.Add(1)
+
+	restoreParam := param.(*RestoreStartParam)
 
 	go func() {
 		dp.log.Info("Start data path restore")
@@ -236,7 +243,7 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			dp.wgDataPath.Done()
 		}()
 
-		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, target.VolMode, uploaderConfigs, dp)
+		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental, target.VolMode, uploaderConfigs, dp)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)
