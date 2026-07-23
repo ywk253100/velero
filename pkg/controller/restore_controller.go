@@ -55,6 +55,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
+	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
@@ -370,6 +371,11 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingVolumeDataPolicy: %s", restore.Spec.ExistingVolumeDataPolicy))
 	}
 
+	// cannot perform inplace restore if RestorePVs is set to false
+	if restore.IsVolumeDataInplaceRestore() && boolptr.IsSetToFalse(restore.Spec.RestorePVs) {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "ExistingVolumeDataPolicy is set to full or incremental, but RestorePVs is set to false, volume data in-place restore is not supported for this restore")
+	}
+
 	// if ScheduleName is specified, fill in BackupName with the most recent successful backup from
 	// the schedule
 	if restore.Spec.ScheduleName != "" {
@@ -397,6 +403,11 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 	info, err := r.fetchBackupInfo(restore.Spec.BackupName)
 	if err != nil {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Error retrieving backup: %v", err))
+		return backupInfo{}, nil, nil
+	}
+
+	if restore.IsVolumeDataInplaceRestore() && boolptr.IsSetToFalse(info.backup.Spec.SnapshotMoveData) {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "ExistingVolumeDataPolicy is set to full or incremental, but SnapshotMoveData is set to false, volume data in-place restore is not supported for this backup")
 		return backupInfo{}, nil, nil
 	}
 

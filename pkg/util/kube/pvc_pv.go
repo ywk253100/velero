@@ -95,6 +95,10 @@ func WaitPVCBound(ctx context.Context, pvcGetter corev1client.CoreV1Interface,
 			return false, nil
 		}
 
+		if tmpPVC.Status.Phase != corev1api.ClaimBound {
+			return false, nil
+		}
+
 		updated = tmpPVC
 
 		return true, nil
