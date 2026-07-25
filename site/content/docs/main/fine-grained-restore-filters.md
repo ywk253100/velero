@@ -65,7 +65,8 @@ data:
         resourceFilters:
           - kinds: [ConfigMap]
             labelSelector:
-              app: my-app
+              matchLabels:
+                app: my-app
 ```
 
 **Restore:**
@@ -149,7 +150,8 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret, Deployment, Pod]
         labelSelector:
-          app: my-app
+          matchLabels:
+            app: my-app
 ```
 
 **Restore:**
@@ -186,7 +188,8 @@ namespacedFilterPolicies:
       - kinds: [ConfigMap]
         names: [vm-1, vm-2]
         labelSelector:
-          resource-type: VirtualMachine
+          matchLabels:
+            resource-type: VirtualMachine
 ```
 
 **Expected outcome:** Only `vm-1` and `vm-2` ConfigMaps with `resource-type=VirtualMachine` are restored. `vm-3` and other ConfigMaps are skipped.
@@ -233,13 +236,62 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap]
         orLabelSelectors:
-          - app: production-workload-1
-            component: vm-group
-          - app: production-workload-2
-            component: vm-service
+          - matchLabels:
+              app: production-workload-1
+              component: vm-group
+          - matchLabels:
+              app: production-workload-2
+              component: vm-service
 ```
 
 **Expected outcome:** ConfigMaps matching either label combination are restored; other ConfigMaps in the namespace are not.
+
+**Note:** Prefer `matchExpressions` with `In` for value-OR on a single key (see next example). Use `orLabelSelectors` when you need OR across **independent multi-key groups**. `labelSelector` and `orLabelSelectors` cannot appear in the same `resourceFilters` entry.
+
+---
+
+### Example 4b — Set-based label selectors (`matchExpressions`)
+
+**Goal:** Restore Deployments and Pods that are in `prod` or `staging`, belong to `app=my-app`, and do **not** carry a skip label.
+
+**Policy:**
+
+```yaml
+version: v1
+namespacedFilterPolicies:
+  - namespaces:
+      - production
+    resourceFilters:
+      - kinds: [Deployment, Pod]
+        labelSelector:
+          matchLabels:
+            app: my-app
+          matchExpressions:
+            - key: environment
+              operator: In
+              values: [prod, staging]
+            - key: do-not-restore
+              operator: DoesNotExist
+```
+
+**Supported operators:** `In`, `NotIn`, `Exists`, `DoesNotExist` (same as Kubernetes / Velero global `--selector`).
+
+**Other useful patterns:**
+
+```yaml
+# Exclude environments
+matchExpressions:
+  - key: environment
+    operator: NotIn
+    values: [dev, test]
+
+# Require a label key to be present (any value)
+matchExpressions:
+  - key: tier
+    operator: Exists
+```
+
+**Expected outcome:** Only Deployments/Pods with `app=my-app`, `environment` in `{prod, staging}`, and without `do-not-restore` are restored.
 
 ---
 
@@ -257,16 +309,21 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret]
         orLabelSelectors:
-          - app: my-app
-          - app: monitoring
+          - matchLabels:
+              app: my-app
+          - matchLabels:
+              app: monitoring
       - kinds: [Deployment]
         orLabelSelectors:
-          - app: my-app
-          - app: monitoring
-          - component: backend
+          - matchLabels:
+              app: my-app
+          - matchLabels:
+              app: monitoring
+          - matchLabels:
+              component: backend
 ```
 
-**Expected outcome:** Resources included if they match **any** map in `orLabelSelectors` for their kind.
+**Expected outcome:** Resources included if they match **any** selector in `orLabelSelectors` for their kind (AND within each selector, OR across the list).
 
 ---
 
@@ -285,9 +342,12 @@ namespacedFilterPolicies:
       - kinds: [ConfigMap]
         names: [vm-1, vm-2]
         orLabelSelectors:
-          - resource-type: VirtualMachine
-          - component: vm-group
-          - component: vm-service
+          - matchLabels:
+              resource-type: VirtualMachine
+          - matchLabels:
+              component: vm-group
+          - matchLabels:
+              component: vm-service
 ```
 
 **Expected outcome:** Only `vm-1` and `vm-2` that also satisfy one of the label OR branches.
@@ -311,7 +371,8 @@ namespacedFilterPolicies:
       - kinds: [ConfigMap]
       - kinds: [Deployment]
         labelSelector:
-          tier: web
+          matchLabels:
+            tier: web
 ```
 
 **Expected outcome:**
@@ -375,10 +436,12 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: ["*"]                 # catch-all
         labelSelector:
-          app: common-app
+          matchLabels:
+            app: common-app
       - kinds: [ConfigMap, Secret]   # override for these kinds
         labelSelector:
-          app: specialized-app
+          matchLabels:
+            app: specialized-app
 ```
 
 **Rules:**
@@ -409,7 +472,8 @@ namespacedFilterPolicies:
         names: [db-credentials, tls-cert]
       - kinds: ["*"]
         labelSelector:
-          restore: "true"
+          matchLabels:
+            restore: "true"
 ```
 
 **Expected outcome:**
@@ -458,7 +522,8 @@ clusterScopedFilterPolicy:
       names: ["my-app-*"]
     - kinds: [ClusterRole, ClusterRoleBinding]
       labelSelector:
-        app: my-app
+        matchLabels:
+          app: my-app
 ```
 
 **Restore (required):** You must still include cluster-scoped kinds on the Restore:
@@ -504,7 +569,8 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret, Deployment]
         labelSelector:
-          app: my-app
+          matchLabels:
+            app: my-app
 ```
 
 **Result:** No Secrets are restored — the namespace policy cannot re-include a globally excluded kind. Velero logs a warning at restore start if you list an excluded kind in `namespacedFilterPolicies`.
@@ -551,8 +617,8 @@ If a resource was backed up (perhaps before the label was added, or manually mod
 | Field | Description |
 |-------|-------------|
 | `kinds` | Resource type names (e.g. `ConfigMap`, `deployments`). Empty or `["*"]` = catch-all (namespace policies only). |
-| `labelSelector` | Equality labels (`key: value`), AND across keys. No `in`, `exists`, etc. — use `orLabelSelectors` for OR. |
-| `orLabelSelectors` | List of label maps; match if **any** map matches (AND within each map). Mutually exclusive with `labelSelector`. |
+| `labelSelector` | Kubernetes-style selector with `matchLabels` and/or `matchExpressions` (`In`, `NotIn`, `Exists`, `DoesNotExist`). All requirements are AND-ed. |
+| `orLabelSelectors` | List of selectors; match if **any** entry matches (AND within each, OR across the list). Use for OR of multi-key groups; prefer `In` for value-OR on one key. Mutually exclusive with `labelSelector`. |
 | `names` | Exact names or glob patterns to include. |
 | `excludedNames` | Patterns to exclude; wins over `names` when both match. |
 
@@ -642,6 +708,7 @@ Velero validates the ResourcePolicy when a restore starts. Common errors:
 | `only one catch-all resource filter is allowed` | Multiple catch-alls in one policy entry |
 | `kind "X" appears in both resourceFilters[...]` | Same kind in two entries |
 | `labelSelector and orLabelSelectors cannot co-exist` | Both set in one entry |
+| `invalid label selector` | Bad operator, values, or label key/value syntax |
 | `duplicate namespace pattern` | Same namespace string in two policy entries |
 | `invalid glob pattern` | Bad characters in namespace or name pattern |
 | `clusterScopedFilterPolicy... kinds must be specified (catch-all is not supported)` | Empty or `["*"]` kinds in cluster policy |
