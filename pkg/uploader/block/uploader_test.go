@@ -483,7 +483,7 @@ func TestGetSourceSize(t *testing.T) {
 			name: "invalid tag value",
 			snapshot: udmrepo.Snapshot{
 				Tags: map[string]string{
-					"bdev-source-size": "abc",
+					bdevSourceSizeTag: "abc",
 				},
 			},
 			expectErr: true,
@@ -492,7 +492,7 @@ func TestGetSourceSize(t *testing.T) {
 			name: "valid tag value",
 			snapshot: udmrepo.Snapshot{
 				Tags: map[string]string{
-					"bdev-source-size": "1048576",
+					bdevSourceSizeTag: "1048576",
 				},
 			},
 			expectErr: false,
@@ -667,7 +667,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 			Description: "test snapshot",
 			RootObject:  udmrepo.ObjectMetadata{ID: "root-id"},
 			Tags: map[string]string{
-				"bdev-source-size": "1048576",
+				bdevSourceSizeTag: "1048576",
 			},
 		}
 

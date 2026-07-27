@@ -155,7 +155,7 @@ func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bi
 	}
 
 	if len(meta.SubObjects) != 1 {
-		return 0, errors.Wrapf(err, "unexpected number of bdev object (%d) for snapshot %s", len(meta.SubObjects), snapshot.Description)
+		return 0, errors.Errorf("unexpected number of bdev object (%d) for snapshot %s", len(meta.SubObjects), snapshot.Description)
 	}
 
 	sourceSize, err := getSourceSize(snapshot)

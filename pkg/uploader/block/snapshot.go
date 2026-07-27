@@ -121,7 +121,10 @@ func snapshotSource(
 		return "", 0, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
 	}
 
-	snap.Tags = make(map[string]string)
+	if snap.Tags == nil {
+		snap.Tags = make(map[string]string)
+	}
+
 	snap.Tags[uploader.CBTChangeIDTag] = cbtSource.ChangeID
 	snap.Tags[uploader.CBTVolumeIDTag] = cbtSource.VolumeID
 	if snapshotTags != nil {
