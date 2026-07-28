@@ -212,6 +212,7 @@ func (r *readResult) resetBuffer(list *freelist.FreeList) {
 
 func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (int64, int64, error) {
 	blockSize := bitmap.BlockSize()
+	totalCount := int64(bitmap.Count())
 	list := freelist.New(bufferSize, int(blockSize))
 	resultChan := make(chan readResult, list.Capacity())
 	quit := make(chan struct{})
@@ -231,7 +232,7 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 	go func() {
 		defer wg.Done()
 		defer close(quit)
-		written, lastPos, writeErr = backupWriteProc(blkup.ctx, writer, resultChan, list, aligned, int64(bitmap.Count()), int(blockSize), blkup.progress)
+		written, lastPos, writeErr = backupWriteProc(blkup.ctx, writer, resultChan, list, aligned, totalCount, int(blockSize), blkup.progress)
 	}()
 
 	wg.Wait()
@@ -312,7 +313,14 @@ func backupWriteProc(ctx context.Context, writer udmrepo.ObjectWriter, resultCha
 		select {
 		case <-ctx.Done():
 			writeErr = ErrCanceled
-		case result = <-resultChan:
+		case r, ok := <-resultChan:
+			if !ok {
+				if ctx.Err() != nil {
+					writeErr = ErrCanceled
+				}
+			} else {
+				result = r
+			}
 		}
 
 		if writeErr != nil {
@@ -391,6 +399,7 @@ func getObjectName(source string) string {
 
 func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bitmap cbt.Iterator, totalLength int64, destPath string) (int64, error) {
 	blockSize := bitmap.BlockSize()
+	totalCount := int64(bitmap.Count())
 	list := freelist.New(bufferSize, int(blockSize))
 	resultChan := make(chan readResult, list.Capacity())
 	quit := make(chan struct{})
@@ -409,7 +418,7 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 	go func() {
 		defer wg.Done()
 		defer close(quit)
-		written, writeErr = restoreWriteProc(blkup.ctx, dest, resultChan, list, totalLength, int64(bitmap.Count()), int(blockSize), destPath, blkup.progress, blkup.log)
+		written, writeErr = restoreWriteProc(blkup.ctx, dest, resultChan, list, totalLength, totalCount, int(blockSize), destPath, blkup.progress, blkup.log)
 	}()
 
 	wg.Wait()
@@ -487,7 +496,14 @@ func restoreWriteProc(ctx context.Context, dest *os.File, resultChan chan readRe
 		select {
 		case <-ctx.Done():
 			writeErr = ErrCanceled
-		case result = <-resultChan:
+		case r, ok := <-resultChan:
+			if !ok {
+				if ctx.Err() != nil {
+					writeErr = ErrCanceled
+				}
+			} else {
+				result = r
+			}
 		}
 
 		if writeErr != nil {
