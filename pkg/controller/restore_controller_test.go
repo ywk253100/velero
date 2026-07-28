@@ -1189,12 +1189,10 @@ func TestValidateAndCompleteWithDefaultResourceModifier(t *testing.T) {
 		assert.Empty(t, restore.Status.ValidationErrors)
 	})
 
-	t.Run("per-restore modifier takes exclusive precedence", func(t *testing.T) {
-		r := setupReconciler(t, "default-rm")
-		require.NoError(t, r.kbClient.Create(t.Context(), &corev1api.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: "default-rm", Namespace: velerov1api.DefaultNamespace},
-			Data:       validCMData,
-		}))
+	t.Run("per-restore modifier takes exclusive precedence over default", func(t *testing.T) {
+		// Default ConfigMap does NOT exist, but per-restore does.
+		// If default were applied, it would fail. Per-restore should succeed.
+		r := setupReconciler(t, "nonexistent-default")
 		require.NoError(t, r.kbClient.Create(t.Context(), &corev1api.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "per-restore-rm", Namespace: velerov1api.DefaultNamespace},
 			Data:       validCMData,
@@ -1215,6 +1213,21 @@ func TestValidateAndCompleteWithDefaultResourceModifier(t *testing.T) {
 
 		skipTrue := true
 		restore := newRestore("", &skipTrue)
+		_, rm, _ := r.validateAndComplete(t.Context(), restore)
+		assert.Nil(t, rm)
+		assert.Empty(t, restore.Status.ValidationErrors)
+	})
+
+	t.Run("default modifier with invalid data is non-fatal", func(t *testing.T) {
+		r := setupReconciler(t, "invalid-default")
+		require.NoError(t, r.kbClient.Create(t.Context(), &corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid-default", Namespace: velerov1api.DefaultNamespace},
+			Data: map[string]string{
+				"modifiers.yaml": "not-valid-yaml: [",
+			},
+		}))
+
+		restore := newRestore("", nil)
 		_, rm, _ := r.validateAndComplete(t.Context(), restore)
 		assert.Nil(t, rm)
 		assert.Empty(t, restore.Status.ValidationErrors)

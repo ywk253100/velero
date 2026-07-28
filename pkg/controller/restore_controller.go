@@ -435,10 +435,12 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 	}
 
 	var resourceModifiers *resourcemodifiers.ResourceModifiers
-	if restore.Spec.ResourceModifier != nil && strings.EqualFold(restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType) {
-		resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, restore.Spec.ResourceModifier.Name, false)
-		if resourceModifiers == nil && len(restore.Status.ValidationErrors) > 0 {
-			return backupInfo{}, nil, nil
+	if restore.Spec.ResourceModifier != nil {
+		if strings.EqualFold(restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType) {
+			resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, restore.Spec.ResourceModifier.Name, false)
+			if resourceModifiers == nil && len(restore.Status.ValidationErrors) > 0 {
+				return backupInfo{}, nil, nil
+			}
 		}
 	} else if r.defaultResourceModifierConfigMap != "" && !boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
 		resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, r.defaultResourceModifierConfigMap, true)
@@ -460,7 +462,7 @@ func (r *restoreReconciler) loadResourceModifierConfigMap(
 			return nil
 		}
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
-			fmt.Sprintf("failed to get resource modifiers configmap %s/%s", restore.Namespace, cmName))
+			fmt.Sprintf("failed to get resource modifiers configmap %s/%s: %v", restore.Namespace, cmName, err))
 		return nil
 	}
 
