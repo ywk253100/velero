@@ -371,6 +371,7 @@ func TestExecute(t *testing.T) {
 		backup               *velerov1api.Backup
 		restore              *velerov1api.Restore
 		pvc                  *corev1api.PersistentVolumeClaim
+		pvcFromBackup        *corev1api.PersistentVolumeClaim
 		vs                   *snapshotv1api.VolumeSnapshot
 		dataUploadResult     *corev1api.ConfigMap
 		expectedErr          string
@@ -404,6 +405,24 @@ func TestExecute(t *testing.T) {
 			).Result(),
 			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(
 				velerov1api.VolumeSnapshotLabel, "vsName",
+				velerov1api.MustIncludeAdditionalItemRestoreAnnotation, "true",
+			)).Result(),
+		},
+		{
+			name:    "Restore from VolumeSnapshot with nil PVC annotations",
+			backup:  builder.ForBackup("velero", "testBackup").Result(),
+			restore: builder.ForRestore("velero", "testRestore").ObjectMeta(builder.WithUID("restoreUID")).Backup("testBackup").Result(),
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testPVC",
+					Namespace: "velero",
+				},
+			},
+			pvcFromBackup: builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName")).Result(),
+			vs: builder.ForVolumeSnapshot("velero", vsName).ObjectMeta(
+				builder.WithAnnotations(velerov1api.VolumeSnapshotRestoreSize, "10Gi"),
+			).Result(),
+			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(
 				velerov1api.MustIncludeAdditionalItemRestoreAnnotation, "true",
 			)).Result(),
 		},
@@ -487,7 +506,13 @@ func TestExecute(t *testing.T) {
 				require.NoError(t, err)
 
 				input.Item = &unstructured.Unstructured{Object: pvcMap}
-				input.ItemFromBackup = &unstructured.Unstructured{Object: pvcMap}
+				if tc.pvcFromBackup != nil {
+					pvcFromBackupMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.pvcFromBackup)
+					require.NoError(t, err)
+					input.ItemFromBackup = &unstructured.Unstructured{Object: pvcFromBackupMap}
+				} else {
+					input.ItemFromBackup = &unstructured.Unstructured{Object: pvcMap}
+				}
 				input.Restore = tc.restore
 			}
 			if tc.preCreatePVC {
