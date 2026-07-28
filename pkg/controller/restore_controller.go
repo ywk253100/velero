@@ -441,6 +441,8 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 			if resourceModifiers == nil && len(restore.Status.ValidationErrors) > 0 {
 				return backupInfo{}, nil, nil
 			}
+		} else {
+			r.logger.Warnf("Unsupported resource modifier kind %q, only %q is supported", restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType)
 		}
 	} else if r.defaultResourceModifierConfigMap != "" && !boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
 		resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, r.defaultResourceModifierConfigMap, true)
