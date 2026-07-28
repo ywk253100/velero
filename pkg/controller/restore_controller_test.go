@@ -1260,6 +1260,38 @@ func TestValidateAndCompleteWithDefaultResourceModifier(t *testing.T) {
 		assert.Nil(t, rm)
 		assert.Empty(t, restore.Status.ValidationErrors)
 	})
+
+	t.Run("unsupported resource modifier kind does not apply default", func(t *testing.T) {
+		r := setupReconciler(t, "default-rm")
+		require.NoError(t, r.kbClient.Create(t.Context(), &corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-rm", Namespace: velerov1api.DefaultNamespace},
+			Data:       validCMData,
+		}))
+
+		restore := newRestore("", nil)
+		restore.Spec.ResourceModifier = &corev1api.TypedLocalObjectReference{
+			Kind: "Secret",
+			Name: "some-secret",
+		}
+		_, rm, _ := r.validateAndComplete(t.Context(), restore)
+		assert.Nil(t, rm)
+		assert.Empty(t, restore.Status.ValidationErrors)
+	})
+
+	t.Run("default modifier validation failure is non-fatal", func(t *testing.T) {
+		r := setupReconciler(t, "invalid-validation")
+		require.NoError(t, r.kbClient.Create(t.Context(), &corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid-validation", Namespace: velerov1api.DefaultNamespace},
+			Data: map[string]string{
+				"modifiers.yaml": "version: v1\nresourceModifierRules:\n- conditions:\n    groupResource: pods\n  patches:\n  - operation: invalid\n    path: \"/spec\"\n    value: \"test\"\n",
+			},
+		}))
+
+		restore := newRestore("", nil)
+		_, rm, _ := r.validateAndComplete(t.Context(), restore)
+		assert.Nil(t, rm)
+		assert.Empty(t, restore.Status.ValidationErrors)
+	})
 }
 
 func TestBackupXorScheduleProvided(t *testing.T) {

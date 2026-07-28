@@ -444,8 +444,12 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		} else {
 			r.logger.Warnf("Unsupported resource modifier kind %q, only %q is supported", restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType)
 		}
-	} else if r.defaultResourceModifierConfigMap != "" && !boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
-		resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, r.defaultResourceModifierConfigMap, true)
+	} else if r.defaultResourceModifierConfigMap != "" {
+		if boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
+			r.logger.Infof("Skipping default resource modifier configmap %s/%s as SkipDefaultResourceModifier is set", restore.Namespace, r.defaultResourceModifierConfigMap)
+		} else {
+			resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, r.defaultResourceModifierConfigMap, true)
+		}
 	}
 
 	return info, resourceModifiers, restoreResPolicies
