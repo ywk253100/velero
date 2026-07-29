@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -211,112 +212,33 @@ func (r *readResult) resetBuffer(list *freelist.FreeList) {
 
 func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (int64, int64, error) {
 	blockSize := bitmap.BlockSize()
+	totalCount := int64(bitmap.Count())
 	list := freelist.New(bufferSize, int(blockSize))
 	resultChan := make(chan readResult, list.Capacity())
-	totalCount := bitmap.Count()
-	aligned := (totalLength + int64(blockSize) - 1) / int64(blockSize) * int64(blockSize)
-
 	quit := make(chan struct{})
-	defer close(quit)
+	aligned := (totalLength + int64(blockSize) - 1) / int64(blockSize) * int64(blockSize)
+	wg := &sync.WaitGroup{}
+	var writeErr error
+	var written int64
+	var lastPos int64
+
+	wg.Add(2)
 
 	go func() {
-		defer close(resultChan)
-
-		offset, valid := bitmap.Next()
-		var buffer []byte
-		for valid {
-			select {
-			case <-blkup.ctx.Done():
-				return
-			case <-quit:
-				return
-			case buffer = <-list.Chunks():
-			}
-
-			length := blockSize
-			if offset+uint64(length) > uint64(totalLength) {
-				length = uint(uint64(totalLength) - offset)
-				clear(buffer)
-			}
-
-			readBytes, err := reader.ReadAt(buffer[:length], int64(offset))
-			if err == nil && readBytes <= 0 {
-				err = io.ErrUnexpectedEOF
-			}
-
-			r := readResult{
-				buffer: buffer,
-				offset: int64(offset),
-				err:    err,
-			}
-
-			if r.err != nil {
-				r.resetBuffer(list)
-			}
-
-			resultChan <- r
-
-			if r.err != nil {
-				return
-			}
-
-			offset, valid = bitmap.Next()
-		}
+		defer wg.Done()
+		backupReadProc(blkup.ctx, reader, resultChan, quit, bitmap, list, totalLength)
 	}()
 
-	var lastPos int64
-	var result readResult
-	var written int64
-	var curCount int64
-	var writeErr error
-	var readerRunning bool
+	go func() {
+		defer wg.Done()
+		defer close(quit)
+		written, lastPos, writeErr = backupWriteProc(blkup.ctx, writer, resultChan, list, aligned, totalCount, int(blockSize), blkup.progress)
+	}()
 
-	for curCount < int64(totalCount) {
-		select {
-		case <-blkup.ctx.Done():
-			writeErr = ErrCanceled
-		case result, readerRunning = <-resultChan:
-			if !readerRunning {
-				if blkup.ctx.Err() != nil {
-					writeErr = ErrCanceled
-				} else {
-					writeErr = io.ErrUnexpectedEOF
-				}
-			}
-		}
-
-		if writeErr != nil {
-			break
-		}
-
-		if result.err != nil {
-			writeErr = result.err
-			break
-		}
-
-		n, err := writer.WriteAt(result.buffer, result.offset)
-		if err != nil {
-			writeErr = err
-			break
-		}
-
-		if blockSize != uint(n) {
-			writeErr = io.ErrShortWrite
-			break
-		}
-
-		written += int64(blockSize)
-		lastPos = result.offset + int64(blockSize)
-		result.resetBuffer(list)
-		curCount++
-
-		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: lastPos, TotalBytes: aligned})
-	}
-
-	result.resetBuffer(list)
+	wg.Wait()
 
 	if writeErr != nil {
-		return written, aligned, writeErr
+		return written, aligned, errors.Wrap(writeErr, "error writing data")
 	}
 
 	if lastPos < aligned {
@@ -331,6 +253,119 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 	}
 
 	return written, aligned, nil
+}
+
+func backupReadProc(ctx context.Context, reader io.ReaderAt, resultChan chan readResult, quit chan struct{}, bitmap cbt.Iterator, list *freelist.FreeList, totalLength int64) {
+	defer close(resultChan)
+
+	blockSize := bitmap.BlockSize()
+	offset, valid := bitmap.Next()
+	var buffer []byte
+	for valid {
+		select {
+		case <-ctx.Done():
+			return
+		case <-quit:
+			return
+		case buffer = <-list.Chunks():
+		}
+
+		length := blockSize
+		if offset+uint64(length) > uint64(totalLength) {
+			length = uint(uint64(totalLength) - offset)
+			clear(buffer)
+		}
+
+		readBytes, err := reader.ReadAt(buffer[:length], int64(offset))
+		if err == nil && readBytes <= 0 {
+			err = io.ErrUnexpectedEOF
+		}
+
+		r := readResult{
+			buffer: buffer,
+			offset: int64(offset),
+			err:    err,
+		}
+
+		if r.err != nil {
+			r.resetBuffer(list)
+		}
+
+		resultChan <- r
+
+		if r.err != nil {
+			return
+		}
+
+		offset, valid = bitmap.Next()
+	}
+}
+
+func backupWriteProc(ctx context.Context, writer udmrepo.ObjectWriter, resultChan chan readResult, list *freelist.FreeList, totalLength int64,
+	totalCount int64, blockSize int, progress uploader.ProgressUpdater) (int64, int64, error) {
+	var lastPos int64
+	var result readResult
+	var written int64
+	var curCount int64
+	var writeErr error
+
+	for {
+		select {
+		case <-ctx.Done():
+			writeErr = ErrCanceled
+		case r, ok := <-resultChan:
+			if !ok {
+				if ctx.Err() != nil {
+					writeErr = ErrCanceled
+				}
+			} else {
+				result = r
+			}
+		}
+
+		if writeErr != nil {
+			break
+		}
+
+		if result.err != nil {
+			writeErr = result.err
+			break
+		}
+
+		if result.buffer == nil {
+			break
+		}
+
+		n, err := writer.WriteAt(result.buffer, result.offset)
+		if err != nil {
+			writeErr = err
+			break
+		}
+
+		if blockSize != n {
+			writeErr = io.ErrShortWrite
+			break
+		}
+
+		written += int64(blockSize)
+		lastPos = result.offset + int64(blockSize)
+		result.resetBuffer(list)
+		curCount++
+
+		progress.UpdateProgress(&uploader.Progress{BytesDone: lastPos, TotalBytes: totalLength})
+	}
+
+	result.resetBuffer(list)
+
+	if writeErr != nil {
+		return written, lastPos, writeErr
+	}
+
+	if curCount < totalCount {
+		return written, lastPos, io.ErrUnexpectedEOF
+	}
+
+	return written, lastPos, nil
 }
 
 func copyTailData(source io.ReaderAt, writer udmrepo.ObjectWriter, totalLength int64, blockSize int64) (int64, error) {
@@ -363,83 +398,111 @@ func getObjectName(source string) string {
 }
 
 func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bitmap cbt.Iterator, totalLength int64, destPath string) (int64, error) {
-	list := freelist.New(bufferSize, blockSize)
+	blockSize := bitmap.BlockSize()
+	totalCount := int64(bitmap.Count())
+	list := freelist.New(bufferSize, int(blockSize))
 	resultChan := make(chan readResult, list.Capacity())
-	zeroBlock := make([]byte, blockSize)
-	totalCount := bitmap.Count()
-
 	quit := make(chan struct{})
-	defer close(quit)
+	var writeErr error
+	var written int64
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(2)
 
 	go func() {
-		defer close(resultChan)
-
-		offset, valid := bitmap.Next()
-		var buffer []byte
-		var nextPos = uint64(0)
-		for valid {
-			select {
-			case <-blkup.ctx.Done():
-				return
-			case <-quit:
-				return
-			case buffer = <-list.Chunks():
-			}
-
-			var err error
-
-			if nextPos != offset {
-				_, err = reader.Seek(int64(offset), io.SeekStart)
-			}
-
-			if err == nil {
-				var length int
-				length, err = io.ReadFull(reader, buffer)
-				if err == nil && length <= 0 {
-					err = io.ErrUnexpectedEOF
-				}
-			}
-
-			r := readResult{
-				buffer: buffer,
-				offset: int64(offset),
-				err:    err,
-			}
-
-			if r.err != nil {
-				r.resetBuffer(list)
-			}
-
-			resultChan <- r
-
-			if r.err != nil {
-				return
-			}
-
-			nextPos = offset + uint64(blockSize)
-			offset, valid = bitmap.Next()
-		}
+		defer wg.Done()
+		restoreReadProc(blkup.ctx, reader, resultChan, quit, bitmap, list)
 	}()
+
+	go func() {
+		defer wg.Done()
+		defer close(quit)
+		written, writeErr = restoreWriteProc(blkup.ctx, dest, resultChan, list, totalLength, totalCount, int(blockSize), destPath, blkup.progress, blkup.log)
+	}()
+
+	wg.Wait()
+
+	if writeErr != nil {
+		return written, errors.Wrap(writeErr, "error writing data")
+	}
+
+	return written, nil
+}
+
+func restoreReadProc(ctx context.Context, reader io.ReadSeeker, resultChan chan readResult, quit chan struct{}, bitmap cbt.Iterator, list *freelist.FreeList) {
+	defer close(resultChan)
+
+	blockSize := bitmap.BlockSize()
+	offset, valid := bitmap.Next()
+	var buffer []byte
+	var nextPos = uint64(0)
+	for valid {
+		select {
+		case <-ctx.Done():
+			return
+		case <-quit:
+			return
+		case buffer = <-list.Chunks():
+		}
+
+		var err error
+
+		if nextPos != offset {
+			_, err = reader.Seek(int64(offset), io.SeekStart)
+		}
+
+		if err == nil {
+			var length int
+			length, err = io.ReadFull(reader, buffer)
+			if err == nil && length <= 0 {
+				err = io.ErrUnexpectedEOF
+			}
+		}
+
+		r := readResult{
+			buffer: buffer,
+			offset: int64(offset),
+			err:    err,
+		}
+
+		if r.err != nil {
+			r.resetBuffer(list)
+		}
+
+		resultChan <- r
+
+		if r.err != nil {
+			return
+		}
+
+		nextPos = offset + uint64(blockSize)
+		offset, valid = bitmap.Next()
+	}
+}
+
+func restoreWriteProc(ctx context.Context, dest *os.File, resultChan chan readResult, list *freelist.FreeList, totalLength int64, totalCount int64,
+	blockSize int, destPath string, progress uploader.ProgressUpdater, log logrus.FieldLogger) (int64, error) {
+	zeroBlock := make([]byte, blockSize)
 
 	var written int64
 	var result readResult
 	var writeErr error
-	var readerRunning bool
 	var zeroStart int64 = -1
 	var zeroLength int64
 	var curCount int64
 
-	for curCount < int64(totalCount) {
+	for {
 		select {
-		case <-blkup.ctx.Done():
+		case <-ctx.Done():
 			writeErr = ErrCanceled
-		case result, readerRunning = <-resultChan:
-			if !readerRunning {
-				if blkup.ctx.Err() != nil {
+		case r, ok := <-resultChan:
+			if !ok {
+				if ctx.Err() != nil {
 					writeErr = ErrCanceled
-				} else {
-					writeErr = io.ErrUnexpectedEOF
 				}
+			} else {
+				result = r
 			}
 		}
 
@@ -452,6 +515,10 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 			break
 		}
 
+		if result.buffer == nil {
+			break
+		}
+
 		length := min(int64(blockSize), totalLength-result.offset)
 		if bytes.Equal(result.buffer, zeroBlock) {
 			if zeroStart == -1 {
@@ -460,7 +527,7 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 			} else if result.offset == zeroStart+zeroLength {
 				zeroLength += length
 			} else {
-				if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+				if err := flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath, log); err != nil {
 					writeErr = errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
 					break
 				}
@@ -469,7 +536,7 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 			}
 		} else {
 			if zeroStart != -1 {
-				if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+				if err := flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath, log); err != nil {
 					writeErr = errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
 					break
 				}
@@ -495,7 +562,7 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 
 		result.resetBuffer(list)
 
-		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: written, TotalBytes: totalLength})
+		progress.UpdateProgress(&uploader.Progress{BytesDone: written, TotalBytes: totalLength})
 	}
 
 	result.resetBuffer(list)
@@ -504,8 +571,12 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 		return written, writeErr
 	}
 
+	if curCount < totalCount {
+		return written, io.ErrUnexpectedEOF
+	}
+
 	if zeroStart != -1 {
-		if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+		if err := flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath, log); err != nil {
 			return written, errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
 		}
 	}
@@ -513,13 +584,13 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 	return written, nil
 }
 
-func (blkup *blockUploader) flushZeroBlocks(dest *os.File, start int64, length int64, zeroBlock []byte, destPath string) error {
+func flushZeroBlocks(dest *os.File, start int64, length int64, zeroBlock []byte, destPath string, log logrus.FieldLogger) error {
 	err := blkZeroOut(dest, start, length)
 	if err == nil {
 		return nil
 	}
 
-	blkup.log.WithError(err).Warnf("Failed to call zero out from dev %s, start %v, length %v. Fallback to conservative way", destPath, start, length)
+	log.WithError(err).Warnf("Failed to call zero out from dev %s, start %v, length %v. Fallback to conservative way", destPath, start, length)
 
 	var written int64
 	for written < length {
