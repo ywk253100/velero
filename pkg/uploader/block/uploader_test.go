@@ -197,7 +197,7 @@ func TestBlockUploaderBackup(t *testing.T) {
 			name:             "canceled in progress",
 			cancelInProgress: true,
 			expectErr:        true,
-			expectErrStr:     "error backing up bdev /data/volume1: uploader is canceled",
+			expectErrStr:     "error backing up bdev /data/volume1: error writing data: uploader is canceled",
 		},
 		{
 			name:         "create object writer err",
@@ -523,13 +523,11 @@ func TestFlushZeroBlocks(t *testing.T) {
 
 		require.NoError(t, f.Truncate(2048))
 
-		blkup := &blockUploader{
-			log: logrus.New(),
-		}
-		blkup.log.(*logrus.Logger).Out = io.Discard
+		log := logrus.New()
+		log.Out = io.Discard
 
 		zeroBlock := make([]byte, 1024)
-		err = blkup.flushZeroBlocks(f, 0, 2048, zeroBlock, f.Name())
+		err = flushZeroBlocks(f, 0, 2048, zeroBlock, f.Name(), log)
 
 		require.NoError(t, err)
 
@@ -577,6 +575,7 @@ func TestRestoreData(t *testing.T) {
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
+		iterMock.On("BlockSize").Return(uint(1048576))
 
 		written, err := blkup.restoreData(reader, f, iterMock, 1048576, f.Name())
 		require.NoError(t, err)
@@ -606,6 +605,7 @@ func TestRestoreData(t *testing.T) {
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
+		iterMock.On("BlockSize").Return(uint(1048576))
 
 		_, err = blkup.restoreData(reader, f, iterMock, 1048576, f.Name())
 		require.Error(t, err)
@@ -682,6 +682,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
+		iterMock.On("BlockSize").Return(uint(1048576))
 
 		written, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.NoError(t, err)
