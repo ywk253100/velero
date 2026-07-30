@@ -177,6 +177,24 @@ func TestExecutePodCommand(t *testing.T) {
 			hookError:             errors.New("hook error"),
 			expectedError:         "hook error",
 		},
+		{
+			// Timeouts from pod annotations go through time.ParseDuration, which accepts
+			// negative values. Without clamping, the hook would run with no timeout at all.
+			name:                  "negative timeout falls back to the default",
+			command:               []string{"some", "command"},
+			expectedContainerName: "foo",
+			expectedErrorMode:     v1.HookErrorModeFail,
+			timeout:               -1 * time.Second,
+			expectedTimeout:       30 * time.Second,
+		},
+		{
+			name:                  "timeout above the maximum is capped",
+			command:               []string{"some", "command"},
+			expectedContainerName: "foo",
+			expectedErrorMode:     v1.HookErrorModeFail,
+			timeout:               100000 * time.Hour,
+			expectedTimeout:       maxHookTimeout,
+		},
 	}
 
 	for _, test := range tests {
