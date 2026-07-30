@@ -15,6 +15,7 @@
     - [1. PVC is Not Actively Used by a Running Pod](#1-pvc-is-not-actively-used-by-a-running-pod)
     - [2. PVC is Bound to the Original PV](#2-pvc-is-bound-to-the-original-pv)
     - [3. Volume Size Validation](#3-volume-size-validation)
+  - [Error Handling](#error-handling)
   - [Restore Workflow Update](#restore-workflow-update)
     - [In-place Incremental Restore for CSI Snapshot with Block Data Move for Block Volumes](#in-place-incremental-restore-for-csi-snapshot-with-block-data-move-for-block-volumes)
     - [In-place Full Restore for CSI Snapshot with Block Data Move for Block Volumes](#in-place-full-restore-for-csi-snapshot-with-block-data-move-for-block-volumes)
@@ -136,8 +137,19 @@ spec:
   - `incremental`: Perform an in-place incremental restore, only overwriting data that has changed since the backup.
 - `uploaderConfig.deleteExtraFiles`: A boolean flag that controls whether files present in the target volume but absent from the backup should be deleted. **Note:** This setting is *only* applicable to File System restores (PodVolumeBackup or CSI File System Data Move) and has no effect on Block Data Move restores. Furthermore, it is ignored for non-in-place restores (where `existingVolumeDataPolicy` is not set to `full` or `incremental`).
 
-If `existingVolumeDataPolicy` is set to `full` or `incremental` but the target PVC does not exist, Velero will log an error and skip the volume restore. Similarly, if these policies are applied but the underlying backup method does not support in-place restores, Velero will log an error and skip the operation.
- 
+If the target PVC does not exist, Velero will fall back to its default behavior and provision a new PVC for the restore, regardless of whether `existingVolumeDataPolicy` is set to `full` or `incremental`. Furthermore, if `existingVolumeDataPolicy` is set to `incremental` but the underlying storage does not support incremental restores, Velero will automatically fall back to a `full` restore.
+
+The following table summarizes the expected behavior for different combinations of `existingResourcePolicy` and `existingVolumeDataPolicy` when the target PVC already exists:
+
+| `existingResourcePolicy` | `existingVolumeDataPolicy` | PVC Resource Action | Volume Data Restore |
+| ------------------------ | -------------------------- | ------------------- | ------------------- |
+| `none`                   | `none`                     | Untouched           | Untouched           |
+| `none`                   | `full`                     | Untouched           | Full                |
+| `none`                   | `incremental`              | Untouched           | Incremental         |
+| `update`                 | `none`                     | Patched             | Untouched           |
+| `update`                 | `full`                     | Patched             | Full                |
+| `update`                 | `incremental`              | Patched             | Incremental         |
+
 **DataDownload CRD**  
 To support incremental restores, the `DataDownload` spec is extended with a new `restoreType` string flag (valid values are `full` and `incremental`) to instruct the data mover to perform an incremental restore. It also introduces a new `csiSnapshot` field, which captures the metadata of a snapshot taken from the existing PVC, acting as the baseline for Changed Block Tracking (CBT) delta calculations during an in-place incremental block restore. Additionally, the `deleteExtraFiles` configuration is passed to the underlying data mover via the existing `dataMoverConfig` map.
 
@@ -219,6 +231,12 @@ For in-place restores, the target volume must be large enough to accommodate the
 
 Before initiating an in-place restore, Velero compares the existing PV's size (`pv.spec.capacity.storage`) against the backup's data size (retrieved from the backup volume info). If the target PV is smaller than the backup data size, Velero will log an error and skip the volume data restoration.
 
+### Error Handling
+
+It is highly recommended that users create a backup (e.g., a CSI snapshot backup without data movement, if possible) before initiating an in-place restore. This ensures that the original state can be recovered in the event of a restore failure.
+
+If an in-place restore fails, Velero will intentionally leave certain temporary resources intact, such as the temporary PVC bound to the existing PV. Velero does not automatically clean up these resources because doing so could inadvertently trigger the deletion of the underlying storage volume. In such failure scenarios, users must manually clean up these temporary resources and, if necessary, use their pre-restore backup to recover the system's state.
+
 ### Restore Workflow Update
 
 This section outlines the step-by-step control path and data path workflows for in-place restores. The exact sequence of operations depends on the backup method (CSI snapshot vs. file system backup), the chosen data mover (block vs. file system), and the target volume mode (block vs. file system). The following subsections detail the mechanisms for each supported scenario.
@@ -227,14 +245,21 @@ This section outlines the step-by-step control path and data path workflows for 
 
 **Control Path**  
 
-PVC RIA:
-- Preserve the `volume.kubernetes.io/selected-node` annotation to ensure correct scheduling during target PVC recreation.
+Maintaining a PersistentVolume's (PV) reclaim policy as `Retain` for an extended period is undesirable, as it can lead to storage leaks if the PV is subsequently deleted by a user (e.g., following a failed restore). To mitigate this risk, Velero minimizes the duration the PV's reclaim policy remains set to `Retain`. This is achieved by quickly binding the PV to a temporary PVC and restoring its original reclaim policy.
 
-PVC CSI RIA:
-- Create a snapshot of the existing `PVC` to serve as the baseline for CBT delta calculations.
-- Patch the existing PV's reclaim policy to `Retain`.
-- Delete the existing PVC.
-- Create a `DataDownload` resource referencing this snapshot and the existing `PV`, with `restoreType` set to `incremental`.
+**PVC RIA:**
+- Preserves the `volume.kubernetes.io/selected-node` annotation to ensure correct node scheduling when the target PVC is recreated.
+
+**PVC CSI RIA:**
+- Create a snapshot of the existing `PVC` to serve as the base
+line for CBT delta calculations.
+- Safely unbinds the existing PV:
+  - Creates a temporary PVC in the Velero namespace, explicitly setting its `Spec.VolumeName` to the existing PV.
+  - Patches the existing PV's reclaim policy to `Retain` to prevent accidental deletion.
+  - Binds the existing PV to the temporary PVC.
+  - Reverts the PV's reclaim policy back to its original value once it is successfully bound.
+- Deletes the existing PVC.
+- Creates a `DataDownload` resource referencing this snapshot and the existing PV, with `restoreType` set to `incremental`.
 
 Restore Exposer:
 - Create a temporary restore PVC and bind it to the existing PV.
@@ -243,7 +268,7 @@ Restore Exposer:
 **Data Path**  
 
 Block Uploader:  
-- The block uploader utilizes the Changed Block Tracking (CBT) delta between the current volume state and the backup snapshot. It skips unchanged blocks and only overwrites modified blocks, significantly reducing I/O operations and overall restore time. If the underlying storage does not support CBT, Velero reports an error and skips restoring the volume data rather than falling back to an in-place full restore.
+- The block uploader leverages Changed Block Tracking (CBT) to calculate the delta between the volume's current state and the backup snapshot. By skipping unchanged blocks and exclusively overwriting the modified ones, it significantly reduces I/O operations and accelerates the overall restore process. If the underlying storage system lacks CBT support, Velero will automatically fall back to performing an in-place full restore.
 
 #### In-place Full Restore for CSI Snapshot with Block Data Move for Block Volumes
 
@@ -280,7 +305,11 @@ PVC RIA:
 
 PVC CSI RIA:
 - Create a snapshot of the existing `PVC` to serve as the baseline for CBT delta calculations.
-- Patch the existing `PV` to set its `persistentVolumeReclaimPolicy` to `Retain`.
+- Safely unbinds the existing PV:
+  - Creates a temporary PVC in the Velero namespace, explicitly setting its `Spec.VolumeName` to the existing PV.
+  - Patches the existing PV's reclaim policy to `Retain` to prevent accidental deletion.
+  - Binds the existing PV to the temporary PVC.
+  - Reverts the PV's reclaim policy back to its original value once it is successfully bound.
 - Delete the existing `PVC`.
 - Create a `DataDownload` resource referencing the snapshot and the existing `PV`, with `restoreType` set to `incremental`.
 
@@ -294,7 +323,7 @@ Restore Exposer:
 **Data Path**  
 
 Block Uploader:  
-- The block uploader utilizes the Changed Block Tracking (CBT) delta between the current volume state and the backup snapshot. It skips unchanged blocks and only overwrites modified blocks, significantly reducing I/O operations and overall restore time. If the underlying storage does not support CBT, Velero reports an error and skips restoring the volume data rather than falling back to an in-place full restore.
+- The block uploader leverages Changed Block Tracking (CBT) to calculate the delta between the volume's current state and the backup snapshot. By skipping unchanged blocks and exclusively overwriting the modified ones, it significantly reduces I/O operations and accelerates the overall restore process. If the underlying storage system lacks CBT support, Velero will automatically fall back to performing an in-place full restore.
 
 **Control Path (Post-Restore)**  
 
