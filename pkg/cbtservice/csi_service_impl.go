@@ -116,6 +116,12 @@ func (s *ServiceImpl) GetChangedBlocks(ctx context.Context, snapshot string, cha
 		return err
 	}
 
+	saNamespace := ""
+	if s.SAName != "" {
+		// The SA is created in the same namespace as Velero server. vsNamespace is the namespace of Velero	server.
+		saNamespace = s.vsNamespace
+	}
+
 	args := iterator.Args{
 		SnapshotName:   snapshot,
 		PrevSnapshotID: changeID,
@@ -126,7 +132,7 @@ func (s *ServiceImpl) GetChangedBlocks(ctx context.Context, snapshot string, cha
 
 		Clients:         clients,
 		Namespace:       s.vsNamespace,
-		SANamespace:     s.vsNamespace,
+		SANamespace:     saNamespace,
 		SAName:          s.SAName,
 		TokenExpirySecs: iterator.DefaultTokenExpirySeconds,
 		MaxResults:      0, // If 0 then the CSI driver decides the value.
