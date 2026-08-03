@@ -11,6 +11,7 @@
   - [CLI](#cli)
   - [Workload Management](#workload-management)
   - [Handling Cross-Zone Scheduling (WaitForFirstConsumer)](#handling-cross-zone-scheduling-waitforfirstconsumer)
+  - [Namespace Mapping](#namespace-mapping)
   - [Pre-flight Checks](#pre-flight-checks)
     - [1. PVC is Not Actively Used by a Running Pod](#1-pvc-is-not-actively-used-by-a-running-pod)
     - [2. PVC is Bound to the Original PV](#2-pvc-is-bound-to-the-original-pv)
@@ -213,6 +214,20 @@ When performing an in-place restore, Velero deletes the existing target PVC and 
 **Solution**:
 During the PVC Restore Item Action (RIA), Velero must extract the `volume.kubernetes.io/selected-node` annotation from the original PVC. When Velero recreates the target PVC, it must inject this annotation back into the PVC spec. 
 By preserving the `selected-node` annotation, the Kubernetes Scheduler is forced to schedule the recreated business Pod to the original node/zone, ensuring it successfully mounts the restored PV.
+
+### Namespace Mapping
+When namespace mapping is configured in the restore spec, in-place restores function as expected for most scenarios. However, in-place incremental restores using CSI snapshots with a block data mover are not natively supported across different namespaces. This limitation exists because Velero cannot utilize Changed Block Tracking (CBT) to calculate data deltas when the target volume resides in a different namespace than the original source volume, as the volumes may originate from different source volume lineages.
+
+Despite this limitation, users can still achieve a fast cross-namespace "clone and restore" workflow. A common use case for this is when a user has a large production workload in a source namespace and wants to quickly spin up a clone in a different namespace (e.g., for debugging, testing, or auditing) based on a specific recent backup. Performing a standard full restore to a new namespace can be time-consuming due to the large amount of data that must be transferred from the backup repository.
+
+Because the data changed between the recent backup and the current live volume is typically minimal, users can optimize this process. To quickly restore the backup to the destination namespace, users can manually take a CSI snapshot of the live source PVC and provision a new PVC in the destination namespace using that snapshot (leveraging the storage provider's fast cloning capabilities). When a Velero restore is subsequently triggered against this new PVC, Velero detects the snapshot and calculates the delta between it and the target backup. By utilizing CBT to write only the modified blocks (effectively "rolling back" the clone to the backup's state), this approach significantly reduces the amount of data transferred and dramatically accelerates the restore process.
+
+The key requirements for this approach are:
+1. **Manual Cloning:** Users must manually take a snapshot of the source PVC and clone it to the destination namespace before triggering the Velero restore. *(Note: Because Kubernetes requires a PVC and its `VolumeSnapshot` to reside in the same namespace, users must manually recreate the `VolumeSnapshotContent` and `VolumeSnapshot` in the destination namespace to perform this clone, or utilize features like `CrossNamespaceVolumeDataSource` if supported by their cluster.)*
+2. **Workload Management:** To prevent data corruption, users must ensure that no running Pods are actively mounting the destination PVC during the restore process.
+3. **Snapshot Detection:** Velero detects the manual snapshot by inspecting the destination PVC. If the `dataSource` of the destination PVC is a `VolumeSnapshot`, Velero retrieves the snapshot handle from the corresponding `VolumeSnapshotContent.Status.SnapshotHandle`. It then uses this handle, along with the one from the backup, to perform CBT calculations.
+4. **One-Shot Operation:** This restore workflow is a one-shot operation. If users need to restore a different backup to the same destination subsequently, they must clean up the destination namespace and repeat the entire cloning and restore process.
+5. **Snapshot Cleanup:** Users are responsible for manually cleaning up the temporary snapshot they created once the Velero restore is complete.
 
 ### Pre-flight Checks
 
