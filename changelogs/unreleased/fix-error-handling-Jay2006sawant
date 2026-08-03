@@ -1,0 +1,9 @@
+fix: return errors correctly in block restore validation and BatchForget
+
+Block uploader Restore used errors.Wrapf with a stale nil err after
+successful getSourceSize, causing size validation failures to return
+(0, nil). flushZeroBlocks had the same pattern on short writes.
+
+BatchForget dropped delete errors when flush also failed.
+
+Signed-off-by: Jay2006sawant <jay242902@gmail.com>
