@@ -168,7 +168,7 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 		Stderr: &stderr,
 	}
 
-	// The timeout drives the context so the exec stream is actually cancelled, rather than
+	// The timeout drives the context so the exec stream is actually canceled, rather than
 	// being left running on the API server after this function has returned.
 	ctx, cancel := context.WithTimeout(context.Background(), localHook.Timeout.Duration)
 	defer cancel()
@@ -178,17 +178,15 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- executor.StreamWithContext(ctx, streamOptions)
+		streamErr := executor.StreamWithContext(ctx, streamOptions)
+		// Inspect the local context as soon as the stream returns. Otherwise a stream error
+		// completed before the deadline could be misclassified if this goroutine sends its
+		// result before the caller is scheduled to receive it.
+		errCh <- normalizeExecHookError(streamErr, ctx.Err(), localHook.Timeout.Duration)
 	}()
 
 	select {
 	case err = <-errCh:
-		// On a timeout the stream returns because the context expired, so both this case
-		// and ctx.Done() are ready and the select picks one at random. Report the timeout
-		// either way instead of surfacing the context error only some of the time.
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return errors.Errorf("timed out after %v", localHook.Timeout.Duration)
-		}
 	case <-ctx.Done():
 		return errors.Errorf("timed out after %v", localHook.Timeout.Duration)
 	}
@@ -197,6 +195,14 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 	hookLog.Infof("stderr: %s", stderr.String())
 
 	return err
+}
+
+func normalizeExecHookError(streamErr, contextErr error, timeout time.Duration) error {
+	if errors.Is(contextErr, context.DeadlineExceeded) {
+		return errors.Errorf("timed out after %v", timeout)
+	}
+
+	return streamErr
 }
 
 func ensureContainerExists(pod *corev1api.Pod, container string) error {

@@ -1,9 +1,26 @@
+/*
+Copyright 2026 the Velero contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package podexec
 
 import (
 	"context"
 	"net/url"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,21 +39,36 @@ const timeoutTestPodJSON = `{
 	"spec": {"containers": [{"name": "container-1"}]}
 }`
 
-// contextAwareExecutor returns once its context is cancelled, like the SPDY executor does.
+// contextAwareExecutor returns once its context is canceled, like the SPDY executor does.
 type contextAwareExecutor struct {
-	cancelled     chan struct{}
-	cancelledOnce bool
+	canceled     chan struct{}
+	canceledOnce bool
 }
 
 func (e *contextAwareExecutor) Stream(options remotecommand.StreamOptions) error { return nil }
 
 func (e *contextAwareExecutor) StreamWithContext(ctx context.Context, options remotecommand.StreamOptions) error {
 	<-ctx.Done()
-	if !e.cancelledOnce {
-		e.cancelledOnce = true
-		close(e.cancelled)
+	if !e.canceledOnce {
+		e.canceledOnce = true
+		close(e.canceled)
 	}
 	return ctx.Err()
+}
+
+// contextIgnoringExecutor lets the outer timeout path return before the stream does.
+// Once released, the stream goroutine can only exit if its result channel is buffered.
+type contextIgnoringExecutor struct {
+	release  <-chan struct{}
+	returned *sync.WaitGroup
+}
+
+func (e *contextIgnoringExecutor) Stream(options remotecommand.StreamOptions) error { return nil }
+
+func (e *contextIgnoringExecutor) StreamWithContext(ctx context.Context, options remotecommand.StreamOptions) error {
+	defer e.returned.Done()
+	<-e.release
+	return nil
 }
 
 func newTimeoutTestExecutor(t *testing.T, exec remotecommand.Executor) (*defaultPodCommandExecutor, map[string]any) {
@@ -70,10 +102,10 @@ func timeoutTestHook(timeout time.Duration) *v1.ExecHook {
 	}
 }
 
-// A hook that times out must have its exec stream cancelled, otherwise the command keeps
+// A hook that times out must have its exec stream canceled, otherwise the command keeps
 // running on the API server after ExecutePodCommand has returned.
 func TestExecutePodCommandCancelsStreamOnTimeout(t *testing.T) {
-	exec := &contextAwareExecutor{cancelled: make(chan struct{})}
+	exec := &contextAwareExecutor{canceled: make(chan struct{})}
 	podCommandExecutor, pod := newTimeoutTestExecutor(t, exec)
 
 	err := podCommandExecutor.ExecutePodCommand(velerotest.NewLogger(), pod, "ns", "pod-1", "hookName", timeoutTestHook(100*time.Millisecond))
@@ -82,25 +114,31 @@ func TestExecutePodCommandCancelsStreamOnTimeout(t *testing.T) {
 	}
 
 	select {
-	case <-exec.cancelled:
+	case <-exec.canceled:
 	case <-time.After(2 * time.Second):
-		t.Fatal("stream was not cancelled after the hook timed out")
+		t.Fatal("stream was not canceled after the hook timed out")
 	}
 }
 
 // When the stream returns because the context expired, both select cases are ready and one
 // is picked at random, so the reported error must not depend on which one wins.
 func TestExecutePodCommandTimeoutErrorIsDeterministic(t *testing.T) {
-	const rounds = 50
+	const (
+		rounds        = 50
+		expectedError = "timed out after 1ms"
+	)
 
 	messages := map[string]int{}
 	for range rounds {
-		exec := &contextAwareExecutor{cancelled: make(chan struct{})}
+		exec := &contextAwareExecutor{canceled: make(chan struct{})}
 		podCommandExecutor, pod := newTimeoutTestExecutor(t, exec)
 
 		err := podCommandExecutor.ExecutePodCommand(velerotest.NewLogger(), pod, "ns", "pod-1", "hookName", timeoutTestHook(time.Millisecond))
 		if err == nil {
 			t.Fatal("expected a timeout error")
+		}
+		if err.Error() != expectedError {
+			t.Fatalf("expected %q, got %q", expectedError, err)
 		}
 		messages[err.Error()]++
 	}
@@ -117,8 +155,11 @@ func TestExecutePodCommandDoesNotLeakOnTimeout(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	before := runtime.NumGoroutine()
 
+	release := make(chan struct{})
+	returned := &sync.WaitGroup{}
 	for range rounds {
-		exec := &contextAwareExecutor{cancelled: make(chan struct{})}
+		returned.Add(1)
+		exec := &contextIgnoringExecutor{release: release, returned: returned}
 		podCommandExecutor, pod := newTimeoutTestExecutor(t, exec)
 
 		if err := podCommandExecutor.ExecutePodCommand(velerotest.NewLogger(), pod, "ns", "pod-1", "hookName", timeoutTestHook(50*time.Millisecond)); err == nil {
@@ -126,7 +167,11 @@ func TestExecutePodCommandDoesNotLeakOnTimeout(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second)
+	// Every ExecutePodCommand call has already taken the timeout path. Releasing the
+	// streams now forces their goroutines to send into an errCh with no receiver.
+	close(release)
+	returned.Wait()
+	time.Sleep(200 * time.Millisecond)
 	runtime.GC()
 	time.Sleep(200 * time.Millisecond)
 
