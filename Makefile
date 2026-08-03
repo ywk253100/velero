@@ -172,12 +172,12 @@ GOIMPORTS_VERSION := $(shell go list -m -f '{{.Version}}' golang.org/x/tools)
 
 .PHONY: help
 help: ## Display this help message
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_%-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-containers' rule.
-all: ## Build all binaries
+all: ## Build the default velero binary
 	@$(MAKE) build
 
 build-%: ## Build specific binary
