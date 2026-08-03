@@ -25,7 +25,7 @@ Fine-grained filters add two optional sections to the ResourcePolicy ConfigMap:
 | `namespacedFilterPolicies` | Namespaces you match (exact name or glob) | **Exclusive allowlist** — only resource kinds listed in `resourceFilters` (or covered by a catch-all) are restored for those namespaces, provided they pass global filters. |
 | `clusterScopedFilterPolicy` | Cluster-scoped resources globally | **Refinement overlay** — listed kinds get per-kind label and name rules; unlisted cluster-scoped kinds still use global RestoreSpec filters. |
 
-**Backward compatible:** if you omit the `ResourcePolicy` reference, restores behave exactly as they do today.
+**Backward compatible:** Fine-grained restore filters are optional. If a restore does not reference a ResourcePolicy, Velero relies solely on standard RestoreSpec filters (includedNamespaces, includedResources, labelSelector, etc.).
 
 ---
 
@@ -210,13 +210,13 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret]
         names: ["app-*"]
-        excludedNames: ["*-tmp", "*-debug"]
+        excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
 ```
 
 **Expected outcome:**
 
 - **Included:** `app-config`, `app-cache-config`, `app-secret`
-- **Excluded:** `app-tmp-config`, `app-debug-config`, `monitoring-tmp-secret`
+- **Excluded:** `app-config-tmp`, `app-tmp-config`, `app-debug-config`, `monitoring-tmp-secret`
 
 `excludedNames` takes precedence over `names` when both match.
 
