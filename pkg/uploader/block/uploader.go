@@ -19,12 +19,14 @@ package block
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -61,10 +63,11 @@ type Uploader interface {
 }
 
 type blockUploader struct {
-	ctx        context.Context
-	repoWriter udmrepo.BackupRepo
-	progress   uploader.ProgressUpdater
-	log        logrus.FieldLogger
+	ctx                context.Context
+	repoWriter         udmrepo.BackupRepo
+	progress           uploader.ProgressUpdater
+	log                logrus.FieldLogger
+	lastProgressUpdate time.Time
 }
 
 func NewUploader(ctx context.Context, repoWriter udmrepo.BackupRepo, progress uploader.ProgressUpdater, log logrus.FieldLogger) Uploader {
@@ -89,7 +92,7 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 	}
 
 	destObj, err := blkup.repoWriter.NewObjectWriter(blkup.ctx, udmrepo.ObjectWriteOptions{
-		Description:  "BDEV:" + getObjectName(source.realSource),
+		Description:  fmt.Sprintf("BDEV:%s-%s", getObjectName(source.realSource), snapStart.Format("2006-01-02-15-04-05")),
 		DataType:     udmrepo.ObjectDataTypeData,
 		AccessMode:   udmrepo.ObjectDataAccessModeBlock,
 		ParentObject: parentObject,
@@ -197,6 +200,17 @@ func (blkup *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter
 	return id, backupSize, objectSize, err
 }
 
+func (blkup *blockUploader) UpdateProgress(p *uploader.Progress) {
+	if blkup.progress == nil {
+		return
+	}
+
+	if time.Since(blkup.lastProgressUpdate) >= 10*time.Second || p.BytesDone == p.TotalBytes {
+		blkup.progress.UpdateProgress(p)
+		blkup.lastProgressUpdate = time.Now()
+	}
+}
+
 type readResult struct {
 	buffer []byte
 	offset int64
@@ -232,7 +246,7 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 	go func() {
 		defer wg.Done()
 		defer close(quit)
-		written, lastPos, writeErr = backupWriteProc(blkup.ctx, writer, resultChan, list, aligned, totalCount, int(blockSize), blkup.progress)
+		written, lastPos, writeErr = backupWriteProc(blkup.ctx, writer, resultChan, list, aligned, totalCount, int(blockSize), blkup)
 	}()
 
 	wg.Wait()
@@ -249,7 +263,7 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 
 		written += s
 
-		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: aligned, TotalBytes: aligned})
+		blkup.UpdateProgress(&uploader.Progress{BytesDone: aligned, TotalBytes: aligned})
 	}
 
 	return written, aligned, nil
@@ -418,7 +432,7 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 	go func() {
 		defer wg.Done()
 		defer close(quit)
-		written, writeErr = restoreWriteProc(blkup.ctx, dest, resultChan, list, totalLength, totalCount, int(blockSize), destPath, blkup.progress, blkup.log)
+		written, writeErr = restoreWriteProc(blkup.ctx, dest, resultChan, list, totalLength, totalCount, int(blockSize), destPath, blkup, blkup.log)
 	}()
 
 	wg.Wait()
