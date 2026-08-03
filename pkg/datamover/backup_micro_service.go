@@ -23,23 +23,22 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	cachetool "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
@@ -202,10 +201,18 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		velerov1api.AsyncOperationIDLabel: du.Labels[velerov1api.AsyncOperationIDLabel],
 	}
 
+	// Modify the ParentSnapshot to "" and ForceFull to true when ParentSnapshot is "none".
+	parentSnapshot := du.Spec.ParentSnapshot
+	forceFull := false
+	if du.Spec.ParentSnapshot == veleroshared.DataUploadParentSnapshotNone {
+		parentSnapshot = ""
+		forceFull = true
+	}
+
 	if err := dp.StartBackup(r.sourceTargetPath, du.Spec.DataMoverConfig, &datapath.BackupStartParam{
 		RealSource:     GetRealSource(du.Spec.SourceNamespace, du.Spec.SourcePVC),
-		ParentSnapshot: du.Spec.ParentSnapshot,
-		ForceFull:      false,
+		ParentSnapshot: parentSnapshot,
+		ForceFull:      forceFull,
 		Tags:           tags,
 		VolumeID:       r.volumeID,
 		ChangeID:       r.changeID,
