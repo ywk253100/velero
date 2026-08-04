@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 
 	appsv1api "k8s.io/api/apps/v1"
@@ -187,16 +188,118 @@ func TestGetInheritedPodInfo(t *testing.T) {
 		},
 	}
 
+	daemonSetWithHostPath := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "fake-ns",
+			Name:      "node-agent",
+		},
+		TypeMeta: metav1.TypeMeta{
+			Kind: "DaemonSet",
+		},
+		Spec: appsv1api.DaemonSetSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{
+					Containers: []corev1api.Container{
+						{
+							Name:  "container-1",
+							Image: "image-1",
+							VolumeMounts: []corev1api.VolumeMount{
+								{
+									Name:      nodeagent.HostPodVolumeMount,
+									MountPath: "/host_pods",
+								},
+								{
+									Name:      hostPluginsVolumeName,
+									MountPath: "/var/lib/kubelet/plugins",
+								},
+								{
+									Name:      "scratch",
+									MountPath: "/scratch",
+								},
+								{
+									Name:      "user-credentials",
+									MountPath: "/credentials",
+								},
+							},
+						},
+					},
+					Volumes: []corev1api.Volume{
+						{
+							Name: nodeagent.HostPodVolumeMount,
+							VolumeSource: corev1api.VolumeSource{
+								HostPath: &corev1api.HostPathVolumeSource{
+									Path: "/var/lib/kubelet/pods",
+								},
+							},
+						},
+						{
+							Name: hostPluginsVolumeName,
+							VolumeSource: corev1api.VolumeSource{
+								HostPath: &corev1api.HostPathVolumeSource{
+									Path: "/var/lib/kubelet/plugins",
+								},
+							},
+						},
+						{
+							Name: "scratch",
+							VolumeSource: corev1api.VolumeSource{
+								EmptyDir: new(corev1api.EmptyDirVolumeSource),
+							},
+						},
+						{
+							Name: "user-credentials",
+							VolumeSource: corev1api.VolumeSource{
+								Secret: &corev1api.SecretVolumeSource{
+									SecretName: "user-credentials",
+								},
+							},
+						},
+					},
+					ServiceAccountName: "sa-1",
+				},
+			},
+		},
+	}
+
+	scratchAndCredentialMounts := []corev1api.VolumeMount{
+		{
+			Name:      "scratch",
+			MountPath: "/scratch",
+		},
+		{
+			Name:      "user-credentials",
+			MountPath: "/credentials",
+		},
+	}
+
+	scratchAndCredentialVolumes := []corev1api.Volume{
+		{
+			Name: "scratch",
+			VolumeSource: corev1api.VolumeSource{
+				EmptyDir: new(corev1api.EmptyDirVolumeSource),
+			},
+		},
+		{
+			Name: "user-credentials",
+			VolumeSource: corev1api.VolumeSource{
+				Secret: &corev1api.SecretVolumeSource{
+					SecretName: "user-credentials",
+				},
+			},
+		},
+	}
+
 	scheme := runtime.NewScheme()
 	appsv1api.AddToScheme(scheme)
 
 	tests := []struct {
-		name          string
-		namespace     string
-		client        kubernetes.Interface
-		kubeClientObj []runtime.Object
-		result        inheritedPodInfo
-		expectErr     string
+		name            string
+		namespace       string
+		client          kubernetes.Interface
+		kubeClientObj   []runtime.Object
+		excludedVolumes []string
+		result          inheritedPodInfo
+		expectErr       string
 	}{
 		{
 			name:      "ds is not found",
@@ -329,12 +432,131 @@ func TestGetInheritedPodInfo(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:      "no excluded volume, host path volumes are inherited",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				daemonSetWithHostPath,
+			},
+			result: inheritedPodInfo{
+				image:          "image-1",
+				serviceAccount: "sa-1",
+				volumeMounts:   daemonSetWithHostPath.Spec.Template.Spec.Containers[0].VolumeMounts,
+				volumes:        daemonSetWithHostPath.Spec.Template.Spec.Volumes,
+			},
+		},
+		{
+			name:      "host path volumes and their mounts are excluded",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				daemonSetWithHostPath,
+			},
+			excludedVolumes: hostPathVolumesOfNodeAgent,
+			result: inheritedPodInfo{
+				image:          "image-1",
+				serviceAccount: "sa-1",
+				volumeMounts:   scratchAndCredentialMounts,
+				volumes:        scratchAndCredentialVolumes,
+			},
+		},
+		{
+			name:      "excluding a volume that doesn't exist doesn't affect the others",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				daemonSetWithNoLog,
+			},
+			excludedVolumes: hostPathVolumesOfNodeAgent,
+			result: inheritedPodInfo{
+				image:          "image-1",
+				serviceAccount: "sa-1",
+				env: []corev1api.EnvVar{
+					{
+						Name:  "env-1",
+						Value: "value-1",
+					},
+					{
+						Name:  "env-2",
+						Value: "value-2",
+					},
+				},
+				envFrom: []corev1api.EnvFromSource{
+					{
+						ConfigMapRef: &corev1api.ConfigMapEnvSource{
+							LocalObjectReference: corev1api.LocalObjectReference{
+								Name: "test-configmap",
+							},
+						},
+					},
+					{
+						SecretRef: &corev1api.SecretEnvSource{
+							LocalObjectReference: corev1api.LocalObjectReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				volumeMounts: []corev1api.VolumeMount{
+					{
+						Name: "volume-1",
+					},
+					{
+						Name: "volume-2",
+					},
+				},
+				volumes: []corev1api.Volume{
+					{
+						Name: "volume-1",
+					},
+					{
+						Name: "volume-2",
+					},
+				},
+			},
+		},
+		{
+			name:      "excluding all volumes results in empty volumes and mounts",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				daemonSetWithNoLog,
+			},
+			excludedVolumes: []string{"volume-1", "volume-2"},
+			result: inheritedPodInfo{
+				image:          "image-1",
+				serviceAccount: "sa-1",
+				env: []corev1api.EnvVar{
+					{
+						Name:  "env-1",
+						Value: "value-1",
+					},
+					{
+						Name:  "env-2",
+						Value: "value-2",
+					},
+				},
+				envFrom: []corev1api.EnvFromSource{
+					{
+						ConfigMapRef: &corev1api.ConfigMapEnvSource{
+							LocalObjectReference: corev1api.LocalObjectReference{
+								Name: "test-configmap",
+							},
+						},
+					},
+					{
+						SecretRef: &corev1api.SecretEnvSource{
+							LocalObjectReference: corev1api.LocalObjectReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
-			info, err := getInheritedPodInfo(t.Context(), fakeKubeClient, test.namespace, kube.NodeOSLinux)
+			info, err := getInheritedPodInfo(t.Context(), fakeKubeClient, test.namespace, kube.NodeOSLinux, test.excludedVolumes...)
 
 			if test.expectErr == "" {
 				require.NoError(t, err)

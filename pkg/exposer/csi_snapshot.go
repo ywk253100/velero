@@ -684,7 +684,9 @@ func (e *csiSnapshotExposer) createBackupPod(
 	containerName := string(ownerObject.UID)
 	volumeName := string(ownerObject.UID)
 
-	podInfo, err := getInheritedPodInfo(ctx, e.kubeClient, ownerObject.Namespace, nodeOS)
+	// The backup pod reads the data through the backup PVC only, so the node-agent's host
+	// path volumes to the kubelet root directory are not inherited.
+	podInfo, err := getInheritedPodInfo(ctx, e.kubeClient, ownerObject.Namespace, nodeOS, hostPathVolumesOfNodeAgent...)
 	if err != nil {
 		return nil, errors.Wrap(err, "error to get inherited pod info from node-agent")
 	}
@@ -750,6 +752,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 	}
 
 	var securityCtx *corev1api.PodSecurityContext
+	var containerSecurityCtx *corev1api.SecurityContext
 	nodeSelector := map[string]string{}
 	podOS := corev1api.PodOS{}
 	if nodeOS == kube.NodeOSWindows {
@@ -786,6 +789,18 @@ func (e *csiSnapshotExposer) createBackupPod(
 		userID := int64(0)
 		securityCtx = &corev1api.PodSecurityContext{
 			RunAsUser: &userID,
+		}
+
+		// The backup pod runs as root so that it can read the backup data regardless of the
+		// ownership, but it doesn't need any capability beyond that.
+		containerSecurityCtx = &corev1api.SecurityContext{
+			AllowPrivilegeEscalation: boolptr.False(),
+			Capabilities: &corev1api.Capabilities{
+				Drop: []corev1api.Capability{"ALL"},
+			},
+			SeccompProfile: &corev1api.SeccompProfile{
+				Type: corev1api.SeccompProfileTypeRuntimeDefault,
+			},
 		}
 
 		if spcNoRelabeling {
@@ -859,12 +874,13 @@ func (e *csiSnapshotExposer) createBackupPod(
 						"data-mover",
 						"backup",
 					},
-					Args:          args,
-					VolumeMounts:  volumeMounts,
-					VolumeDevices: volumeDevices,
-					Env:           podInfo.env,
-					EnvFrom:       podInfo.envFrom,
-					Resources:     resources,
+					Args:            args,
+					VolumeMounts:    volumeMounts,
+					VolumeDevices:   volumeDevices,
+					Env:             podInfo.env,
+					EnvFrom:         podInfo.envFrom,
+					Resources:       resources,
+					SecurityContext: containerSecurityCtx,
 				},
 			},
 			PriorityClassName:             priorityClassName,

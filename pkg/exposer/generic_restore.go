@@ -628,7 +628,9 @@ func (e *genericRestoreExposer) createRestorePod(
 		affinity = &kube.LoadAffinity{}
 	}
 
-	podInfo, err := getInheritedPodInfo(ctx, e.kubeClient, ownerObject.Namespace, nodeOS)
+	// The restore pod writes the data through the restore PVC only, so the node-agent's host
+	// path volumes to the kubelet root directory are not inherited.
+	podInfo, err := getInheritedPodInfo(ctx, e.kubeClient, ownerObject.Namespace, nodeOS, hostPathVolumesOfNodeAgent...)
 	if err != nil {
 		return nil, errors.Wrap(err, "error to get inherited pod info from node-agent")
 	}
@@ -692,6 +694,7 @@ func (e *genericRestoreExposer) createRestorePod(
 	args = append(args, podInfo.logLevelArgs...)
 
 	var securityCtx *corev1api.PodSecurityContext
+	var containerSecurityCtx *corev1api.SecurityContext
 	podOS := corev1api.PodOS{}
 	if nodeOS == kube.NodeOSWindows {
 		userID := "ContainerAdministrator"
@@ -727,6 +730,18 @@ func (e *genericRestoreExposer) createRestorePod(
 		userID := int64(0)
 		securityCtx = &corev1api.PodSecurityContext{
 			RunAsUser: &userID,
+		}
+
+		// The restore pod runs as root so that it can restore the data with the original
+		// ownership, but it doesn't need any capability beyond that.
+		containerSecurityCtx = &corev1api.SecurityContext{
+			AllowPrivilegeEscalation: boolptr.False(),
+			Capabilities: &corev1api.Capabilities{
+				Drop: []corev1api.Capability{"ALL"},
+			},
+			SeccompProfile: &corev1api.SeccompProfile{
+				Type: corev1api.SeccompProfileTypeRuntimeDefault,
+			},
 		}
 
 		podOS.Name = kube.NodeOSLinux
@@ -781,12 +796,13 @@ func (e *genericRestoreExposer) createRestorePod(
 						"data-mover",
 						"restore",
 					},
-					Args:          args,
-					VolumeMounts:  volumeMounts,
-					VolumeDevices: volumeDevices,
-					Env:           podInfo.env,
-					EnvFrom:       podInfo.envFrom,
-					Resources:     resources,
+					Args:            args,
+					VolumeMounts:    volumeMounts,
+					VolumeDevices:   volumeDevices,
+					Env:             podInfo.env,
+					EnvFrom:         podInfo.envFrom,
+					Resources:       resources,
+					SecurityContext: containerSecurityCtx,
 				},
 			},
 			PriorityClassName:             priorityClassName,
