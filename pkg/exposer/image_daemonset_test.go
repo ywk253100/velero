@@ -1,3 +1,19 @@
+/*
+Copyright the Velero contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package exposer
 
 import (
@@ -37,7 +53,7 @@ func TestInheritedPodInfoAgainstRealDaemonSet(t *testing.T) {
 	}
 
 	// fs-backup resolves pod volume data through the kubelet pod directory, so it keeps them.
-	fsBackupInfo, err := getInheritedPodInfo(context.Background(), client, "velero", "linux")
+	fsBackupInfo, err := getInheritedPodInfo(context.Background(), client, "velero", "linux", inheritHostPathVolumes)
 	if err != nil {
 		t.Fatalf("error to get inherited pod info for fs-backup: %v", err)
 	}
@@ -47,7 +63,7 @@ func TestInheritedPodInfoAgainstRealDaemonSet(t *testing.T) {
 	}
 
 	// The data mover pods access data through PVCs, so they must not get any host path.
-	dataMoverInfo, err := getInheritedPodInfo(context.Background(), client, "velero", "linux", hostPathVolumesOfNodeAgent...)
+	dataMoverInfo, err := getInheritedPodInfo(context.Background(), client, "velero", "linux", excludeHostPathVolumes)
 	if err != nil {
 		t.Fatalf("error to get inherited pod info for data mover: %v", err)
 	}

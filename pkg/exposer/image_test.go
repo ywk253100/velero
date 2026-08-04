@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -209,8 +209,12 @@ func TestGetInheritedPodInfo(t *testing.T) {
 									MountPath: "/host_pods",
 								},
 								{
-									Name:      hostPluginsVolumeName,
+									Name:      "host-plugins",
 									MountPath: "/var/lib/kubelet/plugins",
+								},
+								{
+									Name:      "customized-host-path",
+									MountPath: "/customized",
 								},
 								{
 									Name:      "scratch",
@@ -233,10 +237,20 @@ func TestGetInheritedPodInfo(t *testing.T) {
 							},
 						},
 						{
-							Name: hostPluginsVolumeName,
+							Name: "host-plugins",
 							VolumeSource: corev1api.VolumeSource{
 								HostPath: &corev1api.HostPathVolumeSource{
 									Path: "/var/lib/kubelet/plugins",
+								},
+							},
+						},
+						{
+							// A host path volume added by users. It's not named after any
+							// well-known volume, so it can only be recognized by its source.
+							Name: "customized-host-path",
+							VolumeSource: corev1api.VolumeSource{
+								HostPath: &corev1api.HostPathVolumeSource{
+									Path: "/mnt/customized",
 								},
 							},
 						},
@@ -297,7 +311,7 @@ func TestGetInheritedPodInfo(t *testing.T) {
 		namespace       string
 		client          kubernetes.Interface
 		kubeClientObj   []runtime.Object
-		excludedVolumes []string
+		excludeHostPath bool
 		result          inheritedPodInfo
 		expectErr       string
 	}{
@@ -433,7 +447,7 @@ func TestGetInheritedPodInfo(t *testing.T) {
 			},
 		},
 		{
-			name:      "no excluded volume, host path volumes are inherited",
+			name:      "host path volumes are inherited by default",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
 				daemonSetWithHostPath,
@@ -446,12 +460,12 @@ func TestGetInheritedPodInfo(t *testing.T) {
 			},
 		},
 		{
-			name:      "host path volumes and their mounts are excluded",
+			name:      "host path volumes and their mounts are excluded, no matter how they are named",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
 				daemonSetWithHostPath,
 			},
-			excludedVolumes: hostPathVolumesOfNodeAgent,
+			excludeHostPath: true,
 			result: inheritedPodInfo{
 				image:          "image-1",
 				serviceAccount: "sa-1",
@@ -460,12 +474,12 @@ func TestGetInheritedPodInfo(t *testing.T) {
 			},
 		},
 		{
-			name:      "excluding a volume that doesn't exist doesn't affect the others",
+			name:      "excluding host path volumes keeps the others when there is none",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
 				daemonSetWithNoLog,
 			},
-			excludedVolumes: hostPathVolumesOfNodeAgent,
+			excludeHostPath: true,
 			result: inheritedPodInfo{
 				image:          "image-1",
 				serviceAccount: "sa-1",
@@ -513,50 +527,12 @@ func TestGetInheritedPodInfo(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:      "excluding all volumes results in empty volumes and mounts",
-			namespace: "fake-ns",
-			kubeClientObj: []runtime.Object{
-				daemonSetWithNoLog,
-			},
-			excludedVolumes: []string{"volume-1", "volume-2"},
-			result: inheritedPodInfo{
-				image:          "image-1",
-				serviceAccount: "sa-1",
-				env: []corev1api.EnvVar{
-					{
-						Name:  "env-1",
-						Value: "value-1",
-					},
-					{
-						Name:  "env-2",
-						Value: "value-2",
-					},
-				},
-				envFrom: []corev1api.EnvFromSource{
-					{
-						ConfigMapRef: &corev1api.ConfigMapEnvSource{
-							LocalObjectReference: corev1api.LocalObjectReference{
-								Name: "test-configmap",
-							},
-						},
-					},
-					{
-						SecretRef: &corev1api.SecretEnvSource{
-							LocalObjectReference: corev1api.LocalObjectReference{
-								Name: "test-secret",
-							},
-						},
-					},
-				},
-			},
-		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
-			info, err := getInheritedPodInfo(t.Context(), fakeKubeClient, test.namespace, kube.NodeOSLinux, test.excludedVolumes...)
+			info, err := getInheritedPodInfo(t.Context(), fakeKubeClient, test.namespace, kube.NodeOSLinux, test.excludeHostPath)
 
 			if test.expectErr == "" {
 				require.NoError(t, err)

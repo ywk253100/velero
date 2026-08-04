@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,17 +28,16 @@ import (
 )
 
 const (
-	// hostPluginsVolumeName is the name of the node-agent volume that mounts the kubelet
-	// plugins directory from the host.
-	hostPluginsVolumeName = "host-plugins"
-)
+	// excludeHostPathVolumes indicates that the volumes backed by a host path are not
+	// inherited from the node-agent. The exposers accessing data through PVCs use it so
+	// that the hosting pods don't get unnecessary access to the host file system.
+	excludeHostPathVolumes = true
 
-// hostPathVolumesOfNodeAgent lists the node-agent volumes that expose the kubelet root
-// directory of the host. They are only required by fs-backup, which resolves and accesses
-// pod volume data through the kubelet pod directory. Other exposers access data through
-// PVCs only, so they must exclude these volumes from the inherited pod info to avoid
-// granting data mover pods unnecessary access to the host file system.
-var hostPathVolumesOfNodeAgent = []string{nodeagent.HostPodVolumeMount, hostPluginsVolumeName}
+	// inheritHostPathVolumes indicates that the volumes backed by a host path are
+	// inherited from the node-agent. fs-backup uses it because it resolves and accesses
+	// the pod volume data through the kubelet pod directory on the host.
+	inheritHostPathVolumes = false
+)
 
 type inheritedPodInfo struct {
 	image            string
@@ -55,10 +54,11 @@ type inheritedPodInfo struct {
 }
 
 // getInheritedPodInfo collects the pod info to be inherited by the hosting pods from the
-// node-agent pod template. Volumes whose name is listed in excludedVolumes, together with
-// their volume mounts, are dropped from the result. Names that are not found in the
-// node-agent pod template are ignored.
-func getInheritedPodInfo(ctx context.Context, client kubernetes.Interface, veleroNamespace string, osType string, excludedVolumes ...string) (inheritedPodInfo, error) {
+// node-agent pod template. When excludeHostPath is true, the volumes backed by a host path,
+// together with their volume mounts, are dropped from the result. The volumes are detected
+// by their source instead of their name, so the ones customized in the node-agent daemonset
+// are covered as well.
+func getInheritedPodInfo(ctx context.Context, client kubernetes.Interface, veleroNamespace string, osType string, excludeHostPath bool) (inheritedPodInfo, error) {
 	podInfo := inheritedPodInfo{}
 
 	podSpec, err := nodeagent.GetPodSpec(ctx, client, veleroNamespace, osType)
@@ -75,7 +75,7 @@ func getInheritedPodInfo(ctx context.Context, client kubernetes.Interface, veler
 
 	podInfo.env = podSpec.Containers[0].Env
 	podInfo.envFrom = podSpec.Containers[0].EnvFrom
-	podInfo.volumeMounts, podInfo.volumes = excludeVolumes(podSpec.Containers[0].VolumeMounts, podSpec.Volumes, excludedVolumes)
+	podInfo.volumeMounts, podInfo.volumes = filterVolumes(podSpec.Containers[0].VolumeMounts, podSpec.Volumes, excludeHostPath)
 
 	podInfo.dnsPolicy = podSpec.DNSPolicy
 	podInfo.dnsConfig = podSpec.DNSConfig
@@ -98,37 +98,33 @@ func getInheritedPodInfo(ctx context.Context, client kubernetes.Interface, veler
 	return podInfo, nil
 }
 
-// excludeVolumes removes the volumes matching the given names, as well as the volume mounts
-// referring to them, from the given volumes and volume mounts. An excluded name that doesn't
-// match any volume is a no-op, so callers don't need to know how the node-agent daemonset is
-// configured. Volumes that are not excluded, including the ones customized by users, are kept
-// as is.
-func excludeVolumes(volumeMounts []corev1api.VolumeMount, volumes []corev1api.Volume, excludedVolumes []string) ([]corev1api.VolumeMount, []corev1api.Volume) {
-	if len(excludedVolumes) == 0 {
+// filterVolumes removes the volumes backed by a host path, as well as the volume mounts
+// referring to them, when excludeHostPath is true. The volumes are recognized by their
+// source, so the host path volumes customized in the node-agent daemonset are removed as
+// well. The other volumes, including the ones customized by users, are kept as is.
+func filterVolumes(volumeMounts []corev1api.VolumeMount, volumes []corev1api.Volume, excludeHostPath bool) ([]corev1api.VolumeMount, []corev1api.Volume) {
+	if !excludeHostPath {
 		return volumeMounts, volumes
 	}
 
-	excluded := make(map[string]struct{}, len(excludedVolumes))
-	for _, name := range excludedVolumes {
-		excluded[name] = struct{}{}
+	excluded := make(map[string]struct{})
+	retainedVolumes := make([]corev1api.Volume, 0, len(volumes))
+	for _, volume := range volumes {
+		if volume.HostPath != nil {
+			excluded[volume.Name] = struct{}{}
+			continue
+		}
+
+		retainedVolumes = append(retainedVolumes, volume)
 	}
 
-	var retainedMounts []corev1api.VolumeMount
+	retainedMounts := make([]corev1api.VolumeMount, 0, len(volumeMounts))
 	for _, volumeMount := range volumeMounts {
 		if _, found := excluded[volumeMount.Name]; found {
 			continue
 		}
 
 		retainedMounts = append(retainedMounts, volumeMount)
-	}
-
-	var retainedVolumes []corev1api.Volume
-	for _, volume := range volumes {
-		if _, found := excluded[volume.Name]; found {
-			continue
-		}
-
-		retainedVolumes = append(retainedVolumes, volume)
 	}
 
 	return retainedMounts, retainedVolumes
