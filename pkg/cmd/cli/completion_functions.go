@@ -40,9 +40,17 @@ func completeNames(f client.Factory, list kbclient.ObjectList) completionFunc {
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		parentCtx := context.Background()
+		if cmd != nil && cmd.Context() != nil {
+			parentCtx = cmd.Context()
+		}
+		ctx, cancel := context.WithTimeout(parentCtx, 3*time.Second)
 		defer cancel()
-		freshList := list.DeepCopyObject().(kbclient.ObjectList)
+		freshObject := list.DeepCopyObject()
+		freshList, ok := freshObject.(kbclient.ObjectList)
+		if !ok {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
 		if err := kbClient.List(ctx, freshList, &kbclient.ListOptions{Namespace: f.Namespace()}); err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}

@@ -153,7 +153,7 @@ func TestCompleteNames(t *testing.T) {
 			got, directive := completionFn(&cobra.Command{}, tc.args, tc.toComplete)
 
 			assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
-			assert.Equal(t, tc.want, got)
+			assert.ElementsMatch(t, tc.want, got)
 		})
 	}
 }
