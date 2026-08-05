@@ -35,6 +35,7 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	storagev1api "k8s.io/api/storage/v1"
 	storagev1 "k8s.io/client-go/kubernetes/typed/storage/v1"
 )
@@ -136,6 +137,19 @@ func DeletePVIfAny(ctx context.Context, pvGetter corev1client.CoreV1Interface, p
 			log.WithError(err).Errorf("Failed to delete PV %s", pvName)
 		}
 	}
+}
+
+// DeleteVolumeSnapshotIfAny deletes a VolumeSnapshot by namespace and name if it exists, and log an error when the deletion fails
+func DeleteVolumeSnapshotIfAny(ctx context.Context, client crclient.Client, namespace, name string, ensureTimeout time.Duration, log logrus.FieldLogger) {
+	if err := client.Delete(ctx, &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}); err != nil && !apierrors.IsNotFound(err) {
+		log.WithError(err).Errorf("Failed to delete the VolumeSnapshot %s/%s", namespace, name)
+	}
+	// TODO: wait unitl the snapshot is deleted
 }
 
 // EnsureDeletePVC asserts the existence of a PVC by name, deletes it and waits for its disappearance and returns errors on any failure
