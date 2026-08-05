@@ -412,7 +412,7 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 	t.Run("restore", func(t *testing.T) {
 		orig := blockRestoreFunc
 		defer func() { blockRestoreFunc = orig }()
-		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ map[string]string, _ logrus.FieldLogger) (int64, error) {
+		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ bool, _ cbtservice.SourceInfo, _ cbtservice.Service, _ map[string]string, _ logrus.FieldLogger) (int64, error) {
 			return 0, errors.Wrap(block.ErrCanceled, "error restoring bdev")
 		}
 
@@ -422,7 +422,7 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 			log:           logrus.New(),
 		}
 
-		_, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda",
+		_, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda", false, CBTParam{},
 			uploader.PersistentVolumeBlock, map[string]string{}, &blockMockProgressUpdater{})
 
 		require.ErrorIs(t, err, ErrorCanceled)

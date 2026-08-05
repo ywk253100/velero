@@ -150,6 +150,7 @@ func initDataDownloadReconcilerWithError(t *testing.T, objects []any, needError 
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // snapshotMetadataServiceConfigs
 	), nil
 }
 
@@ -585,7 +586,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 						}
 
 						if !test.notMockCleanUp {
-							ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+							ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 						}
 						return ep
 					}()
@@ -744,7 +745,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 				} else {
 					ep.On("RebindVolume", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				}
-				ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+				ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 				return ep
 			}()
 
@@ -1122,7 +1123,8 @@ func (dt *ddResumeTestHelper) RebindVolume(context.Context, corev1api.ObjectRefe
 	return nil
 }
 
-func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference) {}
+func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference, *exposer.GenericRestoreCleanUpParam) {
+}
 
 func (dt *ddResumeTestHelper) newMicroServiceBRWatcher(kbclient.Client, kubernetes.Interface, manager.Manager, string, string, string, string, string, string,
 	datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
@@ -1445,6 +1447,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act

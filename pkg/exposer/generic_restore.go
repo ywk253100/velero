@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,12 +32,22 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	"github.com/vmware-tanzu/velero/pkg/util/csi"
 	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
+
+// GenericRestoreExposeCSI define the CSI specific input param for Generic Restore Expose
+type GenericRestoreExposeCSI struct {
+	// Snapshot is the CSI snapshot spec
+	Snapshot *velerov2alpha1api.CSISnapshotSpec
+	// SnapshotMetadataServiceConfigs is the config for CSI snapshot metadata service
+	SnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+}
 
 // GenericRestoreExposeParam define the input param for Generic Restore Expose
 type GenericRestoreExposeParam struct {
@@ -87,6 +98,9 @@ type GenericRestoreExposeParam struct {
 
 	// DataMover is the data mover type, e.g., velero-fs, velero-block
 	DataMover string
+
+	// SnapshotMetadataServiceConfigs is the config for CSI snapshot metadata service
+	CSI *GenericRestoreExposeCSI
 }
 
 // GenericRestoreRebindVolumeParam define the input param for Generic Restore Rebind Volume
@@ -102,6 +116,11 @@ type GenericRestoreRebindVolumeParam struct {
 
 	// TargetFSType is the file system type of the target volume
 	TargetFSType string
+}
+
+// GenericRestoreCleanUpParam define the input param for Generic Restore CleanUp
+type GenericRestoreCleanUpParam struct {
+	Snapshot *velerov2alpha1api.CSISnapshotSpec
 }
 
 // GenericRestoreExposer is the interfaces for a generic restore exposer
@@ -127,19 +146,21 @@ type GenericRestoreExposer interface {
 	RebindVolume(context.Context, corev1api.ObjectReference, GenericRestoreRebindVolumeParam) error
 
 	// CleanUp cleans up any objects generated during the restore expose
-	CleanUp(context.Context, corev1api.ObjectReference)
+	CleanUp(context.Context, corev1api.ObjectReference, *GenericRestoreCleanUpParam)
 }
 
 // NewGenericRestoreExposer creates a new instance of generic restore exposer
-func NewGenericRestoreExposer(kubeClient kubernetes.Interface, log logrus.FieldLogger) GenericRestoreExposer {
+func NewGenericRestoreExposer(kubeClient kubernetes.Interface, ctrlClient client.Client, log logrus.FieldLogger) GenericRestoreExposer {
 	return &genericRestoreExposer{
 		kubeClient: kubeClient,
+		ctrlClient: ctrlClient,
 		log:        log,
 	}
 }
 
 type genericRestoreExposer struct {
 	kubeClient kubernetes.Interface
+	ctrlClient client.Client
 	log        logrus.FieldLogger
 }
 
@@ -260,6 +281,33 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 	}()
 
 	curLog.Info("Creating restore pod")
+	var volumeID string
+	if param.CSI != nil && param.CSI.Snapshot != nil {
+		vs := &snapshotv1api.VolumeSnapshot{}
+		if err := e.ctrlClient.Get(ctx, client.ObjectKey{
+			Namespace: param.CSI.Snapshot.VolumeSnapshotNamespace,
+			Name:      param.CSI.Snapshot.VolumeSnapshot,
+		}, vs); err != nil {
+			return errors.Wrapf(err, "error to get volume snapshot %s/%s", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot)
+		}
+
+		vsc, err := csi.GetVSCForVS(ctx, vs, e.ctrlClient)
+		if err != nil {
+			return errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
+		}
+
+		var cbtInfo csi.CBTInfo
+		cbtInfo, err = csi.GetCBTInfo(ctx, e.kubeClient, e.log, vs, vsc, param.TargetPVName)
+		if err != nil {
+			return errors.Wrap(err, "error to get CBT info")
+		}
+		curLog.Debugf("CBT info: %+v", cbtInfo)
+		volumeID = cbtInfo.VolumeID
+	}
+	var csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+	if param.CSI != nil {
+		csiSnapshotMetadataServiceConfigs = param.CSI.SnapshotMetadataServiceConfigs
+	}
 	restorePod, err := e.createRestorePod(
 		ctx,
 		ownerObject,
@@ -274,6 +322,9 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		affinity,
 		param.PriorityClassName,
 		cachePVC,
+		param.TargetNamespace,
+		volumeID,
+		csiSnapshotMetadataServiceConfigs,
 	)
 	if err != nil {
 		return errors.Wrapf(err, "error to create restore pod")
@@ -440,7 +491,7 @@ func (e *genericRestoreExposer) DiagnoseExpose(ctx context.Context, ownerObject 
 	return diag
 }
 
-func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1api.ObjectReference) {
+func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1api.ObjectReference, param *GenericRestoreCleanUpParam) {
 	restorePodName := ownerObject.Name
 	restorePVCName := ownerObject.Name
 	cachePVCName := getCachePVCName(ownerObject)
@@ -453,6 +504,11 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
+
+	if param.Snapshot != nil {
+		kube.EnsureDeleteVolumeSnapshotIfAny(ctx, e.ctrlClient, param.Snapshot.VolumeSnapshotNamespace,
+			param.Snapshot.VolumeSnapshot, 0, e.log)
+	}
 }
 
 func (e *genericRestoreExposer) RebindVolume(ctx context.Context, ownerObject corev1api.ObjectReference, param GenericRestoreRebindVolumeParam) error {
@@ -666,6 +722,9 @@ func (e *genericRestoreExposer) createRestorePod(
 	affinity *kube.LoadAffinity,
 	priorityClassName string,
 	cachePVC *corev1api.PersistentVolumeClaim,
+	volumeSnapshotNamespace string,
+	volumeID string,
+	csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
 ) (*corev1api.Pod, error) {
 	restorePodName := ownerObject.Name
 	restorePVCName := ownerObject.Name
@@ -744,6 +803,14 @@ func (e *genericRestoreExposer) createRestorePod(
 		fmt.Sprintf("--data-download=%s", ownerObject.Name),
 		fmt.Sprintf("--resource-timeout=%s", operationTimeout.String()),
 		fmt.Sprintf("--cache-volume-path=%s", cacheVolumePath),
+	}
+
+	if len(volumeID) > 0 {
+		args = append(args, fmt.Sprintf("--vs-namespace=%s", volumeSnapshotNamespace))
+		args = append(args, fmt.Sprintf("--volume-id=%s", volumeID))
+	}
+	if csiSnapshotMetadataServiceConfigs != nil && csiSnapshotMetadataServiceConfigs.SAName != "" {
+		args = append(args, fmt.Sprintf("--cbt-sa-name=%s", csiSnapshotMetadataServiceConfigs.SAName))
 	}
 
 	args = append(args, podInfo.logFormatArgs...)
