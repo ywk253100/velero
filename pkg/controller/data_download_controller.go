@@ -108,7 +108,7 @@ func NewDataDownloadReconciler(
 		logger:                logger.WithField("controller", "DataDownload"),
 		Clock:                 &clock.RealClock{},
 		nodeName:              nodeName,
-		restoreExposer:        exposer.NewGenericRestoreExposer(kubeClient, logger),
+		restoreExposer:        exposer.NewGenericRestoreExposer(kubeClient, client, logger),
 		restorePVCConfig:      restorePVCConfig,
 		backupRepoConfigs:     backupRepoConfigs,
 		cacheVolumeConfigs:    cacheVolumeConfigs,
@@ -487,7 +487,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	log.Info("Cleaning up exposed environment")
-	r.restoreExposer.CleanUp(ctx, objRef)
+	r.restoreExposer.CleanUp(ctx, &dd)
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -536,7 +536,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		return
 	}
 	// cleans up any objects generated during the snapshot expose
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(&dd))
+	r.restoreExposer.CleanUp(ctx, &dd)
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -586,7 +586,7 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 
 	// success update
 	r.metrics.RegisterDataDownloadCancel(r.nodeName)
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, dd)
 
 	log.Warn("data download is canceled")
 
@@ -734,7 +734,7 @@ func (r *DataDownloadReconciler) prepareDataDownload(ssb *velerov2alpha1api.Data
 
 func (r *DataDownloadReconciler) errorOut(ctx context.Context, dd *velerov2alpha1api.DataDownload, err error, msg string, log logrus.FieldLogger) (ctrl.Result, error) {
 	if r.restoreExposer != nil {
-		r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+		r.restoreExposer.CleanUp(ctx, dd)
 	}
 	return ctrl.Result{}, r.updateStatusToFailed(ctx, dd, err, msg, log)
 }
@@ -824,7 +824,7 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 		log.Warnf("[Diagnose DD expose]%s", diag)
 	}
 
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, dd)
 
 	log.Info("Datadownload has been cleaned up")
 
