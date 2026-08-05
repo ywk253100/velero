@@ -884,6 +884,7 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 		*pvcObj.Spec.VolumeMode = corev1api.PersistentVolumeBlock
 	}
 
+<<<<<<< HEAD
 	volumeName := ""
 	sameVolumeMode := true
 	if targetPV != nil {
@@ -894,6 +895,21 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 		}
 		pvcObj.Spec.VolumeName = volumeName
 	}
+=======
+	var (
+		volumeName     string
+		sameVolumeMode bool
+	)
+	if targetPV != nil {
+		sameVolumeMode = isVolumeModeSame(pvcObj, targetPV)
+		if sameVolumeMode {
+			volumeName = targetPV.Name
+		} else {
+			volumeName = ownerObject.Name
+		}
+	}
+	pvcObj.Spec.VolumeName = volumeName
+>>>>>>> 84737e6a9 (Data move PoC)
 
 	restorePVC, err := e.kubeClient.CoreV1().PersistentVolumeClaims(pvcObj.Namespace).Create(ctx, pvcObj, metav1.CreateOptions{})
 	if err != nil {
