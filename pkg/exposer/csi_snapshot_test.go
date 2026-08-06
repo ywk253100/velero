@@ -1326,6 +1326,9 @@ func TestGetExpose(t *testing.T) {
 		Spec: corev1api.PersistentVolumeClaimSpec{
 			VolumeName: "fake-pv-name",
 		},
+		Status: corev1api.PersistentVolumeClaimStatus{
+			Phase: corev1api.ClaimBound,
+		},
 	}
 
 	backupPV := &corev1api.PersistentVolume{
