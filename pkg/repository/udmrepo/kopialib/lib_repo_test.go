@@ -908,7 +908,7 @@ func TestReaderClose(t *testing.T) {
 			err := kr.Close()
 
 			if tc.withPrefetch {
-				assert.ErrorIs(t, kr.prefetch.ctx.Err(), context.Canceled)
+				require.ErrorIs(t, kr.prefetch.ctx.Err(), context.Canceled)
 			}
 
 			if tc.expectedErr == "" {

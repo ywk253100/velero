@@ -382,7 +382,6 @@ func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID, opt ud
 
 			prefetch.cond = sync.NewCond(&prefetch.mu)
 		}
-
 	}
 
 	rd := &kopiaObjectReader{
