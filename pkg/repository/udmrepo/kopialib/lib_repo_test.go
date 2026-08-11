@@ -318,7 +318,7 @@ func TestOpenObject(t *testing.T) {
 				kr.rawRepo = tc.rawRepo
 			}
 
-			_, err := kr.OpenObject(t.Context(), udmrepo.ID(tc.objectID))
+			_, err := kr.OpenObject(t.Context(), udmrepo.ID(tc.objectID), udmrepo.ObjectReadOptions{})
 
 			if tc.expectedErr == "" {
 				assert.NoError(t, err)
