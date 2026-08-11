@@ -663,7 +663,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		objReader.On("Read", mock.Anything).Return(0, io.EOF)
 		objReader.On("Close").Return(nil)
 
-		repoWriter.On("OpenObject", mock.Anything, udmrepo.ID("data-id")).Return(objReader, nil)
+		repoWriter.On("OpenObject", mock.Anything, udmrepo.ID("data-id"), mock.Anything).Return(objReader, nil)
 
 		snap := udmrepo.Snapshot{
 			Description: "test snapshot",
