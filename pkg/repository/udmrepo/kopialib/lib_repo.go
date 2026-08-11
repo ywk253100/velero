@@ -338,7 +338,7 @@ func (km *kopiaMaintenance) maintainProgress(uploaded int64) {
 	}
 }
 
-func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error) {
+func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error) {
 	if kr.rawRepo == nil {
 		return nil, errors.New("repo is closed or not open")
 	}
@@ -550,7 +550,7 @@ func (kr *kopiaRepository) WriteMetadata(ctx context.Context, meta *udmrepo.Meta
 }
 
 func (kr *kopiaRepository) ReadMetadata(ctx context.Context, id udmrepo.ID) (*udmrepo.Metadata, error) {
-	reader, err := kr.OpenObject(ctx, id)
+	reader, err := kr.OpenObject(ctx, id, udmrepo.ObjectReadOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "error to open metadata object %v", id)
 	}

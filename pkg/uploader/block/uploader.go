@@ -176,7 +176,7 @@ func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bi
 		return 0, errors.Errorf("dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
 	}
 
-	reader, err := blkup.repoWriter.OpenObject(blkup.ctx, meta.SubObjects[0].ID)
+	reader, err := blkup.repoWriter.OpenObject(blkup.ctx, meta.SubObjects[0].ID, udmrepo.ObjectReadOptions{})
 	if err != nil {
 		return 0, errors.Wrapf(err, "error opening bdev object %v", meta.SubObjects[0].Name)
 	}
