@@ -617,7 +617,7 @@ func TestRestore(t *testing.T) {
 				}
 			}
 
-			size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", map[string]string{}, testLog())
+			size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", false, cbtservice.SourceInfo{}, nil, map[string]string{}, testLog())
 
 			if tc.expectedErrStr != "" {
 				require.Error(t, err)

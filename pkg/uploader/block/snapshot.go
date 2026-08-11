@@ -198,7 +198,7 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 }
 
 // Restore restore specific sourcePath with given snapshotID and update progress
-func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
+func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
 	log.Info("Start to restore...")
 
 	snapshot, err := rep.GetSnapshot(ctx, udmrepo.ID(snapshotID))
@@ -206,10 +206,23 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 		return 0, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
 	}
 
-	log.Infof("Restore from snapshot %s, description %s, created time %v, tags %v", snapshotID, snapshot.Description, snapshot.EndTime, snapshot.Tags)
+	var tmpSnapshot, changeID, volumeID string
+	if incremental {
+		tmpSnapshot = cbtSource.Snapshot
+		changeID = snapshot.Tags[uploader.CBTChangeIDTag]
+		volumeID = snapshot.Tags[uploader.CBTVolumeIDTag]
+	}
 
-	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), "", "", "")
-	bitmap.SetFull()
+	log.Infof("Restore from snapshot %s, incremental %v, cbt source %v, description %s, created time %v, tags %v", snapshotID, incremental, cbtSource, snapshot.Description, snapshot.EndTime, snapshot.Tags)
+
+	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), tmpSnapshot, changeID, volumeID)
+	if incremental {
+		if err = cbt.SetBitmapOrFull(ctx, cbtService, bitmap); err != nil {
+			log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to real full restore", cbtSource)
+		}
+	} else {
+		bitmap.SetFull()
+	}
 
 	destPath, err := filepath.Abs(dest)
 	if err != nil {

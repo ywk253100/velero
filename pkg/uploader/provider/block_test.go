@@ -439,9 +439,9 @@ func TestBlockProviderRunRestore(t *testing.T) {
 			var capturedSnapshotID string
 			var capturedVolumePath string
 
-			blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, snapshotID string, volumePath string, _ map[string]string, _ logrus.FieldLogger) (int64, error) {
+			blockRestoreFunc = func(ctx context.Context, blkUp block.Uploader, rep udmrepo.BackupRepo, snapshotID string, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
 				capturedSnapshotID = snapshotID
-				capturedVolumePath = volumePath
+				capturedVolumePath = dest
 				return tc.mockRestoreSize, tc.mockRestoreErr
 			}
 
@@ -455,6 +455,7 @@ func TestBlockProviderRunRestore(t *testing.T) {
 				tc.snapshotID,
 				tc.volumePath,
 				false,
+				CBTParam{},
 				uploader.PersistentVolumeBlock,
 				map[string]string{},
 				tc.updater,

@@ -65,6 +65,7 @@ type Provider interface {
 		snapshotID string,
 		volumePath string,
 		incremental bool,
+		cbtParam CBTParam,
 		volMode uploader.PersistentVolumeMode,
 		uploaderConfig map[string]string,
 		updater uploader.ProgressUpdater) (int64, error)
