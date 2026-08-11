@@ -623,7 +623,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(nil, errors.New("meta not found"))
 
 		iterMock := cbtmocks.NewIterator(t)
-		_, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
+		_, _, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "meta not found")
 	})
@@ -685,7 +685,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		iterMock.On("Next").Return(uint64(0), false)
 		iterMock.On("BlockSize").Return(uint(1048576))
 
-		written, err := blkup.Restore(snap, dest, iterMock, nil)
+		written, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.NoError(t, err)
 		assert.Equal(t, int64(1048576), written)
 	})
@@ -709,7 +709,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		dest := destInfo{size: 4194304, path: "/dev/target"}
 		iterMock := cbtmocks.NewIterator(t)
 
-		_, err := blkup.Restore(snap, dest, iterMock, nil)
+		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected size (1048576 vs. 2097152) for bdev object bdev")
 	})
@@ -733,7 +733,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		dest := destInfo{size: 512, path: "/dev/small"}
 		iterMock := cbtmocks.NewIterator(t)
 
-		_, err := blkup.Restore(snap, dest, iterMock, nil)
+		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "dest dev(/dev/small) size is too small")
 	})
