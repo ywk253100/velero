@@ -46,9 +46,13 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	c := &cobra.Command{
 		Use:   use + " NAME",
 		Short: "Create a backup",
-		Args: func(c *cobra.Command, args []string) error {
+	Args: func(c *cobra.Command, args []string) error {
 			if err := cobra.MaximumNArgs(1)(c, args); err != nil {
 				return err
+			}
+			fromSchedule, _ := c.Flags().GetString("from-schedule")
+			if fromSchedule == "" && len(args) == 0 {
+				return fmt.Errorf("a backup name is required, unless you are creating based on a schedule")
 			}
 			if len(args) == 1 {
 				if errs := validation.IsDNS1123Subdomain(args[0]); len(errs) > 0 {
@@ -202,13 +206,16 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 		return err
 	}
 
-	// Ensure the backup name is a valid Kubernetes resource name
-	if o.FromSchedule == "" {
+	// Ensure that unless FromSchedule is set, a backup name is required
+	if o.FromSchedule == "" && o.Name == "" {
+		return fmt.Errorf("a backup name is required, unless you are creating based on a schedule")
+	}
+	// Validate the backup name format whenever a name is provided
+	if o.Name != "" {
 		if errs := validation.IsDNS1123Subdomain(o.Name); len(errs) > 0 {
 			return fmt.Errorf("invalid backup name %q: %s", o.Name, strings.Join(errs, "; "))
 		}
 	}
-
 	errs := collections.ValidateNamespaceIncludesExcludes(o.IncludeNamespaces, o.ExcludeNamespaces)
 	if len(errs) > 0 {
 		return kubeerrs.NewAggregate(errs)
