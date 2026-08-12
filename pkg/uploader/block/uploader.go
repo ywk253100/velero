@@ -59,7 +59,7 @@ type destInfo struct {
 
 type Uploader interface {
 	Backup(sourceInfo, udmrepo.ID, cbt.Iterator, map[string]string) (udmrepo.Snapshot, int64, error)
-	Restore(udmrepo.Snapshot, destInfo, cbt.Iterator, map[string]string) (int64, error)
+	Restore(udmrepo.Snapshot, destInfo, cbt.Iterator, map[string]string) (int64, int64, error)
 }
 
 type blockUploader struct {
@@ -148,18 +148,18 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 	}, backupSize, nil
 }
 
-func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, error) {
+func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, int64, error) {
 	if bitmap == nil {
-		return 0, errors.New("bitmap is not available")
+		return 0, 0, errors.New("bitmap is not available")
 	}
 
 	meta, err := blkup.repoWriter.ReadMetadata(blkup.ctx, snapshot.RootObject.ID)
 	if err != nil {
-		return 0, errors.Wrapf(err, "error reading snapshot metadata for %s", snapshot.Description)
+		return 0, 0, errors.Wrapf(err, "error reading snapshot metadata for %s", snapshot.Description)
 	}
 
 	if len(meta.SubObjects) != 1 {
-		return 0, errors.Errorf("unexpected number of bdev object (%d) for snapshot %s", len(meta.SubObjects), snapshot.Description)
+		return 0, 0, errors.Errorf("unexpected number of bdev object (%d) for snapshot %s", len(meta.SubObjects), snapshot.Description)
 	}
 
 	sourceSize, err := getSourceSize(snapshot)
@@ -169,11 +169,11 @@ func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bi
 	}
 
 	if sourceSize > meta.SubObjects[0].Size {
-		return 0, errors.Errorf("unexpected size (%v vs. %v) for bdev object %s", meta.SubObjects[0].Size, sourceSize, meta.SubObjects[0].Name)
+		return 0, 0, errors.Errorf("unexpected size (%v vs. %v) for bdev object %s", meta.SubObjects[0].Size, sourceSize, meta.SubObjects[0].Name)
 	}
 
 	if sourceSize > dest.size {
-		return 0, errors.Errorf("dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
+		return 0, 0, errors.Errorf("dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
 	}
 
 	reader, err := blkup.repoWriter.OpenObject(blkup.ctx, meta.SubObjects[0].ID, udmrepo.ObjectReadOptions{
@@ -181,16 +181,16 @@ func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bi
 		PrefetchBudgetMB: 256,
 	})
 	if err != nil {
-		return 0, errors.Wrapf(err, "error opening bdev object %v", meta.SubObjects[0].Name)
+		return 0, 0, errors.Wrapf(err, "error opening bdev object %v", meta.SubObjects[0].Name)
 	}
 	defer reader.Close()
 
 	size, err := blkup.restoreData(reader, dest.dev, bitmap, sourceSize, dest.path)
 	if err != nil {
-		return 0, errors.Wrapf(err, "error restoring bdev object %s to volume %s", meta.SubObjects[0].Name, dest.path)
+		return 0, 0, errors.Wrapf(err, "error restoring bdev object %s to volume %s", meta.SubObjects[0].Name, dest.path)
 	}
 
-	return size, nil
+	return size, sourceSize, nil
 }
 
 func (blkup *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (udmrepo.ID, int64, int64, error) {
@@ -444,6 +444,8 @@ func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bit
 		return written, errors.Wrap(writeErr, "error writing data")
 	}
 
+	blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: totalLength, TotalBytes: totalLength})
+
 	return written, nil
 }
 
@@ -579,7 +581,7 @@ func restoreWriteProc(ctx context.Context, dest *os.File, resultChan chan readRe
 
 		result.resetBuffer(list)
 
-		progress.UpdateProgress(&uploader.Progress{BytesDone: written, TotalBytes: totalLength})
+		progress.UpdateProgress(&uploader.Progress{BytesDone: result.offset + length, TotalBytes: totalLength})
 	}
 
 	result.resetBuffer(list)
