@@ -26,6 +26,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
 	repoProvider "github.com/vmware-tanzu/velero/pkg/repository/provider"
@@ -53,6 +54,14 @@ type BackupStartParam struct {
 	ParentSnapshot string
 	ForceFull      bool
 	Tags           map[string]string
+	VolumeID       string
+	ChangeID       string
+	SnapshotID     string
+	CBTService     cbtservice.Service
+}
+
+// RestoreStartParam define the input param for restore start
+type RestoreStartParam struct {
 }
 
 type generalDataPath struct {
@@ -182,8 +191,25 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 			dp.wgDataPath.Done()
 		}()
 
-		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := dp.uploaderProv.RunBackup(dp.ctx, source.ByPath, backupParam.RealSource, backupParam.Tags, backupParam.ForceFull,
-			backupParam.ParentSnapshot, provider.CBTParam{}, source.VolMode, uploaderConfig, dp)
+		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := dp.uploaderProv.RunBackup(
+			dp.ctx,
+			source.ByPath,
+			backupParam.RealSource,
+			backupParam.Tags,
+			backupParam.ForceFull,
+			backupParam.ParentSnapshot,
+			provider.CBTParam{
+				Source: cbtservice.SourceInfo{
+					Snapshot: backupParam.SnapshotID,
+					VolumeID: backupParam.VolumeID,
+					ChangeID: backupParam.ChangeID,
+				},
+				Service: backupParam.CBTService,
+			},
+			source.VolMode,
+			uploaderConfig,
+			dp,
+		)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)
@@ -201,7 +227,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 	return nil
 }
 
-func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string, param any) error {
 	if !dp.initialized {
 		return errors.New("data path is not initialized")
 	}

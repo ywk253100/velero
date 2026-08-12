@@ -22,8 +22,6 @@ import (
 	"strconv"
 	"time"
 
-	"k8s.io/client-go/util/retry"
-
 	"github.com/cockroachdb/errors"
 	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -31,6 +29,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	storagev1api "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -39,16 +38,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	"k8s.io/client-go/util/retry"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/label"
+	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	plugincommon "github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	"github.com/vmware-tanzu/velero/pkg/plugin/utils/volumehelper"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
@@ -56,6 +56,7 @@ import (
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/csi"
+	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
 	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
@@ -160,7 +161,7 @@ func (p *pvcBackupItemAction) getOrCreateVolumeHelper(backup *velerov1api.Backup
 	return p.getVolumeHelperWithCache(backup)
 }
 
-func (p *pvcBackupItemAction) validatePVCandPV(
+func (p *pvcBackupItemAction) validatePVCAndPV(
 	pvc corev1api.PersistentVolumeClaim,
 	item runtime.Unstructured,
 ) (
@@ -213,6 +214,7 @@ func (p *pvcBackupItemAction) validatePVCandPV(
 func (p *pvcBackupItemAction) createVolumeSnapshot(
 	pvc corev1api.PersistentVolumeClaim,
 	backup *velerov1api.Backup,
+	policySnapshotClass string,
 ) (
 	vs *snapshotv1api.VolumeSnapshot,
 	err error,
@@ -233,6 +235,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 		&pvc,
 		p.log,
 		p.crClient,
+		policySnapshotClass,
 	)
 	if err != nil {
 		return nil, errors.Wrapf(
@@ -304,7 +307,7 @@ func (p *pvcBackupItemAction) Execute(
 		return nil, nil, "", nil, errors.WithStack(err)
 	}
 
-	valid, item, fsType, err := p.validatePVCandPV(
+	valid, item, fsType, err := p.validatePVCAndPV(
 		pvc,
 		item,
 	)
@@ -339,7 +342,25 @@ func (p *pvcBackupItemAction) Execute(
 		return nil, nil, "", nil, err
 	}
 
-	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup)
+	// validate that the node-agent daemonset is ready when snapshot data movement with
+	// the built-in data mover is requested. Without this, the DataUpload CR will be
+	// created but never processed (the DataUpload controller runs inside node-agent),
+	// causing the backup to hang until itemOperationTimeout expires.
+	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) && datamover.IsBuiltInDataMover(backup.Spec.DataMover) {
+		if err := nodeagent.IsReady(context.TODO(), backup.Namespace, p.crClient, p.log); err != nil {
+			p.log.WithError(err).Error("cannot perform snapshot data movement without running node-agent pods")
+			return nil, nil, "", nil, errors.Wrap(err, "CSI PVC BIA cannot proceed: node-agent is not ready for snapshot data movement")
+		}
+	}
+
+	policySnapshotClass, scErr := vh.GetSnapshotClass(item, kuberesource.PersistentVolumeClaims)
+	if scErr != nil {
+		p.log.WithError(scErr).Warn("failed to get snapshotClass from volume policy, proceeding without it")
+	} else if policySnapshotClass != "" {
+		p.log.Infof("Volume policy specifies snapshotClass=%s for PVC %s/%s", policySnapshotClass, pvc.Namespace, pvc.Name)
+	}
+
+	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup, policySnapshotClass)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -537,6 +558,12 @@ func newDataUpload(
 	vsc *snapshotv1api.VolumeSnapshotContent,
 	fsType string,
 ) *velerov2alpha1.DataUpload {
+	parentSnapshot := ""
+
+	if backup.Spec.BackupType == velerov1api.BackupTypeFull {
+		parentSnapshot = veleroshared.DataUploadParentSnapshotNone
+	}
+
 	dataUpload := &velerov2alpha1.DataUpload{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: velerov2alpha1.SchemeGroupVersion.String(),
@@ -574,6 +601,7 @@ func newDataUpload(
 			SourceNamespace:       pvc.Namespace,
 			OperationTimeout:      backup.Spec.CSISnapshotTimeout,
 			SourceFSType:          fsType,
+			ParentSnapshot:        parentSnapshot,
 		},
 	}
 
@@ -672,6 +700,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 	ctx context.Context,
 	pvc corev1api.PersistentVolumeClaim,
 	backup *velerov1api.Backup,
+	policySnapshotClass string,
 ) (*snapshotv1api.VolumeSnapshot, error) {
 	vgsLabelKey := backup.Spec.VolumeGroupSnapshotLabelKey
 	group, hasLabel := pvc.Labels[vgsLabelKey]
@@ -802,7 +831,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 	}
 
 	// Legacy fallback: create individual VS
-	return p.createVolumeSnapshot(pvc, backup)
+	return p.createVolumeSnapshot(pvc, backup, policySnapshotClass)
 }
 
 func (p *pvcBackupItemAction) findExistingVSForBackup(

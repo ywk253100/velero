@@ -3,12 +3,13 @@ on: [pull_request]
 jobs:
 
   codespell:
+    if: github.repository == 'velero-io/velero'
     name: Run Codespell
     runs-on: ubuntu-latest
     steps:
 
     - name: Check out the code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Codespell
       uses: codespell-project/actions-codespell@master

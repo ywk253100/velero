@@ -32,9 +32,11 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
@@ -61,7 +63,13 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
   velero restore create --from-schedule schedule-1 --allow-partially-failed
 
   # Create a restore for only persistentvolumeclaims and persistentvolumes within a backup.
-  velero restore create --from-backup backup-2 --include-resources persistentvolumeclaims,persistentvolumes`,
+  velero restore create --from-backup backup-2 --include-resources persistentvolumeclaims,persistentvolumes
+
+Notes:
+- Global filters (--include-resources, --selector, etc.) apply to all included namespaces
+- Namespace-scoped filters defined in --resource-policies-configmap refine global filters for matching namespaces (globally excluded kinds cannot be re-included)
+- Fine-grained global filter policies defined in --resource-policies-configmap refine global filters for cluster-scoped resources
+- Use 'velero restore describe' to view the referenced resource policies ConfigMap after restore creation`,
 		Args: cobra.MaximumNArgs(1),
 		Run: func(c *cobra.Command, args []string) {
 			cmd.CheckError(o.Complete(args, f))
@@ -74,35 +82,40 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
 
+	_ = c.RegisterFlagCompletionFunc("from-backup", cli.CompleteBackupNames(f))
+	_ = c.RegisterFlagCompletionFunc("from-schedule", cli.CompleteScheduleNames(f))
+
 	return c
 }
 
 type CreateOptions struct {
-	BackupName                string
-	ScheduleName              string
-	RestoreName               string
-	RestoreVolumes            flag.OptionalBool
-	PreserveNodePorts         flag.OptionalBool
-	Labels                    flag.Map
-	Annotations               flag.Map
-	IncludeNamespaces         flag.StringArray
-	ExcludeNamespaces         flag.StringArray
-	ExistingResourcePolicy    string
-	IncludeResources          flag.StringArray
-	ExcludeResources          flag.StringArray
-	StatusIncludeResources    flag.StringArray
-	StatusExcludeResources    flag.StringArray
-	NamespaceMappings         flag.Map
-	Selector                  flag.LabelSelector
-	OrSelector                flag.OrLabelSelector
-	IncludeClusterResources   flag.OptionalBool
-	Wait                      bool
-	AllowPartiallyFailed      flag.OptionalBool
-	ItemOperationTimeout      time.Duration
-	ResourceModifierConfigMap string
-	WriteSparseFiles          flag.OptionalBool
-	ParallelFilesDownload     int
-	client                    kbclient.WithWatch
+	BackupName                  string
+	ScheduleName                string
+	RestoreName                 string
+	RestoreVolumes              flag.OptionalBool
+	PreserveNodePorts           flag.OptionalBool
+	Labels                      flag.Map
+	Annotations                 flag.Map
+	IncludeNamespaces           flag.StringArray
+	ExcludeNamespaces           flag.StringArray
+	ExistingResourcePolicy      string
+	IncludeResources            flag.StringArray
+	ExcludeResources            flag.StringArray
+	StatusIncludeResources      flag.StringArray
+	StatusExcludeResources      flag.StringArray
+	NamespaceMappings           flag.Map
+	Selector                    flag.LabelSelector
+	OrSelector                  flag.OrLabelSelector
+	IncludeClusterResources     flag.OptionalBool
+	Wait                        bool
+	AllowPartiallyFailed        flag.OptionalBool
+	ItemOperationTimeout        time.Duration
+	ResourceModifierConfigMap   string
+	ResourcePoliciesConfigMap   string
+	SkipDefaultResourceModifier bool
+	WriteSparseFiles            flag.OptionalBool
+	ParallelFilesDownload       int
+	client                      kbclient.WithWatch
 }
 
 func NewCreateOptions() *CreateOptions {
@@ -153,6 +166,10 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVarP(&o.Wait, "wait", "w", o.Wait, "Wait for the operation to complete.")
 
 	flags.StringVar(&o.ResourceModifierConfigMap, "resource-modifier-configmap", "", "Reference to the resource modifier configmap that restore will use")
+
+	flags.StringVar(&o.ResourcePoliciesConfigMap, "resource-policies-configmap", "", "Reference to the ConfigMap containing restore resource filter policies")
+
+	flags.BoolVar(&o.SkipDefaultResourceModifier, "skip-default-resource-modifier", false, "Skip applying the server-configured default resource modifier for this restore")
 
 	f = flags.VarPF(&o.WriteSparseFiles, "write-sparse-files", "", "Whether to write sparse files during restoring volumes")
 	f.NoOptDefVal = cmd.TRUE
@@ -310,6 +327,15 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		}
 	}
 
+	var resPolicies *corev1api.TypedLocalObjectReference
+
+	if o.ResourcePoliciesConfigMap != "" {
+		resPolicies = &corev1api.TypedLocalObjectReference{
+			Kind: resourcepolicies.ConfigmapRefType,
+			Name: o.ResourcePoliciesConfigMap,
+		}
+	}
+
 	restore := &api.Restore{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:   f.Namespace(),
@@ -332,6 +358,7 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 			PreserveNodePorts:       o.PreserveNodePorts.Value,
 			IncludeClusterResources: o.IncludeClusterResources.Value,
 			ResourceModifier:        resModifiers,
+			ResourcePolicy:          resPolicies,
 			ItemOperationTimeout: metav1.Duration{
 				Duration: o.ItemOperationTimeout,
 			},
@@ -340,6 +367,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 				ParallelFilesDownload: o.ParallelFilesDownload,
 			},
 		},
+	}
+
+	if o.SkipDefaultResourceModifier {
+		restore.Spec.SkipDefaultResourceModifier = boolptr.True()
 	}
 
 	if len([]string(o.StatusIncludeResources)) > 0 {

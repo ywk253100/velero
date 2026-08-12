@@ -23,23 +23,23 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	cachetool "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
@@ -67,6 +67,11 @@ type BackupMicroService struct {
 	duInformer cache.Informer
 	duHandler  cachetool.ResourceEventHandlerRegistration
 	nodeName   string
+
+	changeID   string
+	volumeID   string
+	snapshotID string
+	cbtService cbtservice.Service
 }
 
 type dataPathResult struct {
@@ -76,7 +81,7 @@ type dataPathResult struct {
 
 func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataUploadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	duInformer cache.Informer, log logrus.FieldLogger) *BackupMicroService {
+	duInformer cache.Informer, changeID string, volumeID string, snapshotID string, cbtService cbtservice.Service, log logrus.FieldLogger) *BackupMicroService {
 	return &BackupMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -91,6 +96,10 @@ func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient
 		nodeName:         nodeName,
 		resultSignal:     make(chan dataPathResult),
 		duInformer:       duInformer,
+		changeID:         changeID,
+		volumeID:         volumeID,
+		snapshotID:       snapshotID,
+		cbtService:       cbtService,
 	}
 }
 
@@ -195,16 +204,28 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		velerov1api.AsyncOperationIDLabel: du.Labels[velerov1api.AsyncOperationIDLabel],
 	}
 
+	// Modify the ParentSnapshot to "" and ForceFull to true when ParentSnapshot is "none".
+	parentSnapshot := du.Spec.ParentSnapshot
+	forceFull := false
+	if du.Spec.ParentSnapshot == veleroshared.DataUploadParentSnapshotNone {
+		parentSnapshot = ""
+		forceFull = true
+	}
+
 	if err := dp.StartBackup(r.sourceTargetPath, du.Spec.DataMoverConfig, &datapath.BackupStartParam{
 		RealSource:     GetRealSource(du.Spec.SourceNamespace, du.Spec.SourcePVC),
-		ParentSnapshot: "",
-		ForceFull:      false,
+		ParentSnapshot: parentSnapshot,
+		ForceFull:      forceFull,
 		Tags:           tags,
+		VolumeID:       r.volumeID,
+		ChangeID:       r.changeID,
+		SnapshotID:     r.snapshotID,
+		CBTService:     r.cbtService,
 	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path backup")
 	}
 
-	log.Info("Async fs backup data path started")
+	log.Info("Async backup data path started")
 	r.eventRecorder.Event(du, false, datapath.EventReasonStarted, "Data path for %s started", du.Name)
 
 	result := ""
@@ -219,7 +240,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	}
 
 	if err != nil {
-		log.WithError(err).Error("Async fs backup was not completed")
+		log.WithError(err).Error("Async backup was not completed")
 	}
 
 	r.eventRecorder.EndingEvent(du, false, datapath.EventReasonStopped, "Data path for %s stopped", du.Name)
@@ -256,12 +277,12 @@ func (r *BackupMicroService) OnDataUploadCompleted(ctx context.Context, namespac
 		}
 	}
 
-	log.Info("Async fs backup completed")
+	log.Info("Async backup completed")
 }
 
 func (r *BackupMicroService) OnDataUploadFailed(ctx context.Context, namespace string, duName string, err error) {
 	log := r.logger.WithField("dataupload", duName)
-	log.WithError(err).Error("Async fs backup data path failed")
+	log.WithError(err).Error("Async backup data path failed")
 
 	r.eventRecorder.Event(r.dataUpload, false, datapath.EventReasonFailed, "Data path for data upload %s failed, error %v", r.dataUploadName, err)
 	r.resultSignal <- dataPathResult{
@@ -271,7 +292,7 @@ func (r *BackupMicroService) OnDataUploadFailed(ctx context.Context, namespace s
 
 func (r *BackupMicroService) OnDataUploadCancelled(ctx context.Context, namespace string, duName string) {
 	log := r.logger.WithField("dataupload", duName)
-	log.Warn("Async fs backup data path canceled")
+	log.Warn("Async backup data path canceled")
 
 	r.eventRecorder.Event(r.dataUpload, false, datapath.EventReasonCancelled, "Data path for data upload %s canceled", duName)
 	r.resultSignal <- dataPathResult{

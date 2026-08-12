@@ -32,6 +32,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
@@ -75,6 +76,10 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
 
+	_ = c.RegisterFlagCompletionFunc("from-schedule", cli.CompleteScheduleNames(f))
+	_ = c.RegisterFlagCompletionFunc("storage-location", cli.CompleteBackupStorageLocationNames(f))
+	_ = c.RegisterFlagCompletionFunc("volume-snapshot-locations", cli.CompleteVolumeSnapshotLocationNames(f))
+
 	return c
 }
 
@@ -108,6 +113,7 @@ type CreateOptions struct {
 	ResPoliciesConfigmap            string
 	client                          kbclient.WithWatch
 	ParallelFilesUpload             int
+	BackupType                      string
 }
 
 func NewCreateOptions() *CreateOptions {
@@ -156,6 +162,7 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&o.ResPoliciesConfigmap, "resource-policies-configmap", "", "Reference to the resource policies configmap that backup should use")
 	flags.StringVar(&o.DataMover, "data-mover", "", "Specify the data mover to be used by the backup. If the parameter is not set or set as 'velero', the built-in data mover will be used")
 	flags.IntVar(&o.ParallelFilesUpload, "parallel-files-upload", 0, "Number of files uploads simultaneously when running a backup. This is only applicable for the kopia uploader")
+	flags.StringVar(&o.BackupType, "backup-type", "", "Specify how volume data is backed up, with possible values including Full and Incremental.")
 }
 
 // BindWait binds the wait flag separately so it is not called by other create
@@ -217,6 +224,10 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 		}
 	}
 
+	if err := o.validateBackupType(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -228,6 +239,24 @@ func (o *CreateOptions) validateFromScheduleFlag(c *cobra.Command) error {
 
 	// Assign the trimmed value back
 	o.FromSchedule = trimmed
+	return nil
+}
+
+// validateBackupType check the backupType value and return the valid value.
+func (o *CreateOptions) validateBackupType() error {
+	// Allow full, and incremental from the CLI, and ignore case of the input string's case.
+	backupType := strings.ToLower(strings.TrimSpace(o.BackupType))
+
+	switch backupType {
+	case "":
+	case "incremental":
+		o.BackupType = string(velerov1api.BackupTypeIncremental)
+	case "full":
+		o.BackupType = string(velerov1api.BackupTypeFull)
+	default:
+		return fmt.Errorf("invalid backup type %s - valid values are 'Incremental', and 'Full'", backupType)
+	}
+
 	return nil
 }
 
@@ -393,7 +422,8 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 			VolumeSnapshotLocations(o.SnapshotLocations...).
 			CSISnapshotTimeout(o.CSISnapshotTimeout).
 			ItemOperationTimeout(o.ItemOperationTimeout).
-			DataMover(o.DataMover)
+			DataMover(o.DataMover).
+			BackupType(velerov1api.BackupType(o.BackupType))
 		if len(o.OrderedResources) > 0 {
 			orders, err := ParseOrderedResources(o.OrderedResources)
 			if err != nil {

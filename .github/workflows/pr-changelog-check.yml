@@ -7,12 +7,13 @@ on:
 jobs:
 
   build:
+    if: github.repository == 'velero-io/velero'
     name: Run Changelog Check
     runs-on: ubuntu-latest
     steps:
 
     - name: Check out the code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Changelog check
       if: ${{ !(contains(github.event.pull_request.labels.*.name, 'kind/changelog-not-required') || contains(github.event.pull_request.labels.*.name, 'Design') || contains(github.event.pull_request.labels.*.name, 'Website') || contains(github.event.pull_request.labels.*.name, 'Documentation'))}}

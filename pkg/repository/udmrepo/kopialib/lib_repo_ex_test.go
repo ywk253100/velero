@@ -1,3 +1,19 @@
+/*
+Copyright the Velero contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package kopialib
 
 import (
@@ -15,8 +31,8 @@ import (
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	repomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/freelist"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/util/freelist"
 )
 
 type mockDirectRepository struct {
@@ -275,7 +291,7 @@ func TestKopiaObjectWriterEx_Write(t *testing.T) {
 				t.Helper()
 				err := kow.getWriteError()
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "error opening writer for -b0")
+				assert.Contains(t, err.Error(), "error writing object for , entry 0: error opening writer")
 			},
 		},
 		{
@@ -920,7 +936,7 @@ func TestKopiaObjectWriterEx_WriteAt(t *testing.T) {
 			},
 			inputData:   make([]byte, 1024),
 			offset:      1024,
-			expectedErr: "error writing zero object for -b0: error writing for -b0: simulated zero object write error",
+			expectedErr: "error writing zero object for , entry 0: error writing data: simulated zero object write error",
 		},
 		{
 			name: "writeObject short write",
@@ -948,7 +964,7 @@ func TestKopiaObjectWriterEx_WriteAt(t *testing.T) {
 				t.Helper()
 				err := kow.getWriteError()
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "short write for -b0")
+				assert.Contains(t, err.Error(), "error writing object for , entry 0: short write")
 			},
 		},
 	}
@@ -1192,6 +1208,10 @@ func TestKopiaObjectWriterEx_MixedWriteAndWriteAt(t *testing.T) {
 	assert.Equal(t, int64(3072), kow.entries[3].Start)
 }
 
+// TestKopiaObjectWriterEx_ConcurrentAsyncErrors verifies the async error contract
+// under real scheduling: once an async block write fails, the error either fails a
+// subsequent Write call fast or surfaces at Result — it is never lost. Which of the
+// two happens first depends on goroutine scheduling, and both are correct.
 func TestKopiaObjectWriterEx_ConcurrentAsyncErrors(t *testing.T) {
 	mockRepoWriter := repomocks.NewMockRepositoryWriter(t)
 	mockWriter := repomocks.NewWriter(t)
@@ -1215,14 +1235,65 @@ func TestKopiaObjectWriterEx_ConcurrentAsyncErrors(t *testing.T) {
 
 	data := make([]byte, 1024)
 
-	// Issue multiple writes so they all spawn async goroutines
-	// First few writes shouldn't fail immediately until getWriteError catches the asynchronous fault
+	// Issue multiple writes so they all spawn async goroutines. A later Write may
+	// observe the stored async error and fail fast — that is correct behavior.
+	for i := 0; i < 10; i++ {
+		l, err := kow.Write(data)
+		if err != nil {
+			assert.Contains(t, err.Error(), "simulated async error")
+			break
+		}
+		assert.Equal(t, 1024, l)
+	}
+
+	// Regardless of whether a Write observed the error first, Result must report it.
+	id, err := kow.Result()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated async error")
+	assert.Equal(t, udmrepo.ID(""), id)
+}
+
+// TestKopiaObjectWriterEx_AsyncErrorSurfacesAtResult pins the late-error schedule:
+// async writes are held until all writes have been queued, so no Write call observes
+// the failure and Result alone must report it.
+func TestKopiaObjectWriterEx_AsyncErrorSurfacesAtResult(t *testing.T) {
+	mockRepoWriter := repomocks.NewMockRepositoryWriter(t)
+	mockWriter := repomocks.NewWriter(t)
+
+	releaseWrites := make(chan struct{})
+	mockWriter.On("Write", mock.Anything).Run(func(mock.Arguments) {
+		<-releaseWrites
+	}).Return(0, errors.New("simulated async error"))
+	mockWriter.On("Close").Return(nil)
+
+	mockRepoWriter.On("NewObjectWriter", mock.Anything, mock.Anything).Return(mockWriter)
+
+	sem := make(chan struct{}, 10)
+	buf := freelist.New(10*1024, 1024)
+
+	kow := &kopiaObjectWriterEx{
+		ctx:            context.Background(),
+		rawRepoWriter:  mockRepoWriter,
+		blockSize:      1024,
+		asyncWritesSem: sem,
+		asyncBuffer:    buf,
+		logger:         velerotest.NewLogger(),
+	}
+
+	data := make([]byte, 1024)
+
+	// All async writes block on releaseWrites, so no error can be stored yet and
+	// every Write must succeed.
 	for i := 0; i < 10; i++ {
 		l, err := kow.Write(data)
 		require.NoError(t, err)
 		assert.Equal(t, 1024, l)
 	}
 
+	close(releaseWrites)
+
+	// Result waits for the async writers to finish and must report their error.
 	id, err := kow.Result()
 
 	require.Error(t, err)
