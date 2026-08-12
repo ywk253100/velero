@@ -233,7 +233,7 @@ func TestCreateOptions_OrderedResources(t *testing.T) {
 }
 
 func TestCreateCommand(t *testing.T) {
-	name := "nameToBeCreated"
+	name := "name-to-be-created"
 	args := []string{name}
 
 	t.Run("create a backup create command with full options except fromSchedule and wait, then run by create option", func(t *testing.T) {

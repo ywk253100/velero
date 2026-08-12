@@ -46,7 +46,17 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	c := &cobra.Command{
 		Use:   use + " NAME",
 		Short: "Create a backup",
-		Args:  cobra.MaximumNArgs(1),
+		Args: func(c *cobra.Command, args []string) error {
+			if err := cobra.MaximumNArgs(1)(c, args); err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				if errs := validation.IsDNS1123Subdomain(args[0]); len(errs) > 0 {
+					return fmt.Errorf("invalid backup name %q: %s", args[0], strings.Join(errs, "; "))
+				}
+			}
+			return nil
+		},
 		Run: func(c *cobra.Command, args []string) {
 			cmd.CheckError(o.Complete(args, f))
 			cmd.CheckError(o.Validate(c, args, f))
