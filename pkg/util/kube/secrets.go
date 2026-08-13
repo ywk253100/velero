@@ -113,18 +113,6 @@ func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secret
 	return ErrSecretCollision
 }
 
-// DeleteSecretIfAny deletes a secret if it exists, logging but not returning errors.
-func DeleteSecretIfAny(ctx context.Context, client corev1client.CoreV1Interface, secretName, namespace string, log logrus.FieldLogger) {
-	err := client.Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Debugf("Secret %s/%s not found, skipping delete", namespace, secretName)
-		} else {
-			log.WithError(err).Errorf("Failed to delete secret %s/%s", namespace, secretName)
-		}
-	}
-}
-
 // DeleteSecretsWithLabel deletes all secrets in a namespace matching a label key=value pair.
 // Uses UID preconditions to avoid deleting a recreated object with the same name.
 func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Interface, namespace, labelKey, labelValue string, log logrus.FieldLogger) {
@@ -191,18 +179,6 @@ func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmN
 
 	log.Infof("ConfigMap %s already exists in %s owned by a different owner, collision detected", cmName, targetNamespace)
 	return ErrSecretCollision
-}
-
-// DeleteConfigMapIfAny deletes a configmap if it exists, logging but not returning errors.
-func DeleteConfigMapIfAny(ctx context.Context, client corev1client.CoreV1Interface, cmName, namespace string, log logrus.FieldLogger) {
-	err := client.ConfigMaps(namespace).Delete(ctx, cmName, metav1.DeleteOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Debugf("ConfigMap %s/%s not found, skipping delete", namespace, cmName)
-		} else {
-			log.WithError(err).Errorf("Failed to delete configmap %s/%s", namespace, cmName)
-		}
-	}
 }
 
 // DeleteConfigMapsWithLabel deletes all configmaps in a namespace matching a label key=value pair.

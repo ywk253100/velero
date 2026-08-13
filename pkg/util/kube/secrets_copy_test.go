@@ -163,28 +163,6 @@ func TestCopySecret(t *testing.T) {
 	}
 }
 
-func TestDeleteSecretIfAny(t *testing.T) {
-	log := logrus.New()
-
-	t.Run("deletes existing secret", func(t *testing.T) {
-		secret := &corev1api.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-secret", Namespace: "velero"},
-		}
-		fakeClient := fake.NewSimpleClientset(secret)
-
-		DeleteSecretIfAny(context.Background(), fakeClient.CoreV1(), "test-secret", "velero", log)
-
-		_, err := fakeClient.CoreV1().Secrets("velero").Get(
-			context.Background(), "test-secret", metav1.GetOptions{})
-		assert.Error(t, err)
-	})
-
-	t.Run("no error when secret does not exist", func(t *testing.T) {
-		fakeClient := fake.NewSimpleClientset()
-		DeleteSecretIfAny(context.Background(), fakeClient.CoreV1(), "missing", "velero", log)
-	})
-}
-
 func TestDeleteSecretsWithLabel(t *testing.T) {
 	log := logrus.New()
 
@@ -351,28 +329,6 @@ func TestCopyConfigMap(t *testing.T) {
 			assert.NotNil(t, copied)
 		})
 	}
-}
-
-func TestDeleteConfigMapIfAny(t *testing.T) {
-	log := logrus.New()
-
-	t.Run("deletes existing configmap", func(t *testing.T) {
-		cm := &corev1api.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-cm", Namespace: "velero"},
-		}
-		fakeClient := fake.NewSimpleClientset(cm)
-
-		DeleteConfigMapIfAny(context.Background(), fakeClient.CoreV1(), "test-cm", "velero", log)
-
-		_, err := fakeClient.CoreV1().ConfigMaps("velero").Get(
-			context.Background(), "test-cm", metav1.GetOptions{})
-		assert.Error(t, err)
-	})
-
-	t.Run("no error when configmap does not exist", func(t *testing.T) {
-		fakeClient := fake.NewSimpleClientset()
-		DeleteConfigMapIfAny(context.Background(), fakeClient.CoreV1(), "missing", "velero", log)
-	})
 }
 
 func TestDeleteConfigMapsWithLabel(t *testing.T) {
