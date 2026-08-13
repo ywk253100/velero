@@ -490,7 +490,7 @@ func TestCreateCommand_Args(t *testing.T) {
 			cmd := NewCreateCommand(f, "")
 			if tc.fromSchedule != "" {
 				err := cmd.Flags().Set("from-schedule", tc.fromSchedule)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 
 			err := cmd.Args(cmd, tc.args)
