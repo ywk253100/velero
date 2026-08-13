@@ -77,6 +77,18 @@ type BackupPVC struct {
 type RestorePVC struct {
 	// IgnoreDelayBinding indicates to ignore delay binding the restorePVC when it is in WaitForFirstConsumer mode
 	IgnoreDelayBinding bool `json:"ignoreDelayBinding,omitempty"`
+
+	// SecretNames is a list of secret names to copy from the target namespace to the
+	// Velero namespace before creating the restorePVC. The secrets are deleted after the
+	// DataDownload completes. This is needed for CSI drivers that require namespace-scoped
+	// secrets for volume provisioning (e.g., encrypted volumes).
+	SecretNames []string `json:"secretNames,omitempty"`
+
+	// ConfigMapNames is a list of configmap names to copy from the target namespace to the
+	// Velero namespace before creating the restorePVC. The configmaps are deleted after the
+	// DataDownload completes. This is needed for CSI drivers that require namespace-scoped
+	// configmaps for volume provisioning (e.g., tenant-specific Vault connection overrides).
+	ConfigMapNames []string `json:"configMapNames,omitempty"`
 }
 
 type CachePVC struct {
