@@ -29,6 +29,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const testCopyLabel = "velero.io/backup-pvc-secret"
+
 func TestCopySecret(t *testing.T) {
 	log := logrus.New()
 
@@ -81,7 +83,7 @@ func TestCopySecret(t *testing.T) {
 				&corev1api.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "ceph-csi-kms-token", Namespace: "velero",
-						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+						Labels: map[string]string{testCopyLabel: "du-123"},
 					},
 					Data: map[string][]byte{"token": []byte("same-token")},
 					Type: corev1api.SecretTypeOpaque,
@@ -103,7 +105,7 @@ func TestCopySecret(t *testing.T) {
 				&corev1api.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "ceph-csi-kms-token", Namespace: "velero",
-						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+						Labels: map[string]string{testCopyLabel: "du-123"},
 					},
 					Data: map[string][]byte{"token": []byte("same-token")},
 					Type: corev1api.SecretTypeOpaque,
@@ -140,7 +142,8 @@ func TestCopySecret(t *testing.T) {
 			fakeClient := fake.NewSimpleClientset(tt.objects...)
 
 			err := CopySecret(context.Background(), fakeClient.CoreV1(),
-				tt.secretName, tt.sourceNS, tt.targetNS, tt.ownerName, log)
+				tt.secretName, tt.sourceNS, tt.targetNS,
+				map[string]string{testCopyLabel: tt.ownerName}, log)
 
 			if tt.expectErr {
 				require.Error(t, err)
@@ -189,19 +192,19 @@ func TestDeleteSecretsWithLabel(t *testing.T) {
 		&corev1api.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "secret-1", Namespace: "velero",
-				Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+				Labels: map[string]string{testCopyLabel: "du-123"},
 			},
 		},
 		&corev1api.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "secret-2", Namespace: "velero",
-				Labels: map[string]string{BackupPVCSecretLabel: "du-456"},
+				Labels: map[string]string{testCopyLabel: "du-456"},
 			},
 		},
 	)
 
 	DeleteSecretsWithLabel(context.Background(), fakeClient.CoreV1(), "velero",
-		BackupPVCSecretLabel, "du-123", log)
+		testCopyLabel, "du-123", log)
 
 	_, err := fakeClient.CoreV1().Secrets("velero").Get(
 		context.Background(), "secret-1", metav1.GetOptions{})
@@ -262,7 +265,7 @@ func TestCopyConfigMap(t *testing.T) {
 				&corev1api.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "ceph-csi-kms-config", Namespace: "velero",
-						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+						Labels: map[string]string{testCopyLabel: "du-123"},
 					},
 					Data: map[string]string{"vaultAddress": "https://vault.example.com"},
 				},
@@ -282,7 +285,7 @@ func TestCopyConfigMap(t *testing.T) {
 				&corev1api.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "ceph-csi-kms-config", Namespace: "velero",
-						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+						Labels: map[string]string{testCopyLabel: "du-123"},
 					},
 					Data: map[string]string{"vaultAddress": "https://vault.example.com"},
 				},
@@ -329,7 +332,8 @@ func TestCopyConfigMap(t *testing.T) {
 			fakeClient := fake.NewSimpleClientset(tt.objects...)
 
 			err := CopyConfigMap(context.Background(), fakeClient.CoreV1(),
-				tt.cmName, tt.sourceNS, tt.targetNS, tt.ownerName, log)
+				tt.cmName, tt.sourceNS, tt.targetNS,
+				map[string]string{testCopyLabel: tt.ownerName}, log)
 
 			if tt.expectErr {
 				require.Error(t, err)
@@ -378,19 +382,19 @@ func TestDeleteConfigMapsWithLabel(t *testing.T) {
 		&corev1api.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "cm-1", Namespace: "velero",
-				Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+				Labels: map[string]string{testCopyLabel: "du-123"},
 			},
 		},
 		&corev1api.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "cm-2", Namespace: "velero",
-				Labels: map[string]string{BackupPVCSecretLabel: "du-456"},
+				Labels: map[string]string{testCopyLabel: "du-456"},
 			},
 		},
 	)
 
 	DeleteConfigMapsWithLabel(context.Background(), fakeClient.CoreV1(), "velero",
-		BackupPVCSecretLabel, "du-123", log)
+		testCopyLabel, "du-123", log)
 
 	_, err := fakeClient.CoreV1().ConfigMaps("velero").Get(
 		context.Background(), "cm-1", metav1.GetOptions{})

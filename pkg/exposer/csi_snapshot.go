@@ -44,6 +44,10 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
+// BackupPVCSecretLabel is the label applied to secrets and configmaps copied to the
+// Velero namespace for backup PVC provisioning. The value is the owning DataUpload name.
+const BackupPVCSecretLabel = "velero.io/backup-pvc-secret" //nolint:gosec // not a credential
+
 // CSISnapshotExposeParam define the input param for Expose of CSI snapshots
 type CSISnapshotExposeParam struct {
 	// SnapshotName is the original volume snapshot name
@@ -139,27 +143,6 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		"owner": ownerObject.Name,
 	})
 
-	// Copy secrets and configmaps from source namespace to Velero namespace if configured.
-	// Done before creating any intermediate objects so failure doesn't require cleanup.
-	// These are needed by CSI drivers that require namespace-scoped resources for volume
-	// provisioning (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
-	if value, exists := csiExposeParam.BackupPVCConfig[csiExposeParam.StorageClass]; exists {
-		for _, secretName := range value.SecretNames {
-			if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
-				csiExposeParam.SourceNamespace, ownerObject.Namespace, ownerObject.Name, curLog); copyErr != nil {
-				return errors.Wrapf(copyErr, "error copying secret %s from %s to %s",
-					secretName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
-			}
-		}
-		for _, cmName := range value.ConfigMapNames {
-			if copyErr := kube.CopyConfigMap(ctx, e.kubeClient.CoreV1(), cmName,
-				csiExposeParam.SourceNamespace, ownerObject.Namespace, ownerObject.Name, curLog); copyErr != nil {
-				return errors.Wrapf(copyErr, "error copying configmap %s from %s to %s",
-					cmName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
-			}
-		}
-	}
-
 	volumeTopology, err := kube.GetVolumeTopology(ctx, e.kubeClient.CoreV1(), e.kubeClient.StorageV1(), csiExposeParam.SourcePVName, csiExposeParam.StorageClass)
 	if err != nil {
 		return errors.Wrapf(err, "error getting volume topology for PV %s, storage class %s", csiExposeParam.SourcePVName, csiExposeParam.StorageClass)
@@ -177,6 +160,28 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 	}
 
 	curLog.Info("Volumesnapshot is ready")
+
+	// Copy secrets and configmaps from source namespace to Velero namespace if configured.
+	// Done before creating any intermediate objects so failure doesn't require cleanup.
+	// These are needed by CSI drivers that require namespace-scoped resources for volume
+	// provisioning (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
+	if value, exists := csiExposeParam.BackupPVCConfig[csiExposeParam.StorageClass]; exists {
+		copyLabels := map[string]string{BackupPVCSecretLabel: ownerObject.Name}
+		for _, secretName := range value.SecretNames {
+			if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
+				csiExposeParam.SourceNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
+				return errors.Wrapf(copyErr, "error copying secret %s from %s to %s",
+					secretName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
+			}
+		}
+		for _, cmName := range value.ConfigMapNames {
+			if copyErr := kube.CopyConfigMap(ctx, e.kubeClient.CoreV1(), cmName,
+				csiExposeParam.SourceNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
+				return errors.Wrapf(copyErr, "error copying configmap %s from %s to %s",
+					cmName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
+			}
+		}
+	}
 
 	vsc, err := csi.GetVolumeSnapshotContentForVolumeSnapshot(ctx, volumeSnapshot, e.csiSnapshotClient)
 	if err != nil {
@@ -536,9 +541,9 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), backupPVCName, ownerObject.Namespace, cleanUpTimeout, e.log)
 
 	kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		kube.BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, ownerObject.Name, e.log)
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		kube.BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, ownerObject.Name, e.log)
 
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)

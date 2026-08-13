@@ -55,21 +55,25 @@ func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.
 	return key, nil
 }
 
-const (
-	// BackupPVCSecretLabel is the label applied to secrets and configmaps copied to the
-	// Velero namespace for backup PVC provisioning. The value is the owning DataUpload name.
-	BackupPVCSecretLabel = "velero.io/backup-pvc-secret" //nolint:gosec // not a credential
-)
-
 // ErrSecretCollision is returned when a secret or configmap with the same name but different
-// data already exists in the target namespace, indicating another DataUpload is using it.
+// data already exists in the target namespace, indicating another owner is using it.
 var ErrSecretCollision = errors.New("secret collision: same name exists with different data")
 
-// CopySecret copies a secret from sourceNamespace to targetNamespace.
-// If a secret with the same name already exists in the target with identical data
-// and the same owner, it is a no-op. If the data matches but a different owner holds
-// it, or the data differs, it returns ErrSecretCollision.
-func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secretName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
+// labelsMatch reports whether all entries in want are present in have with matching values.
+func labelsMatch(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// CopySecret copies a secret from sourceNamespace to targetNamespace, applying the given labels.
+// If a secret with the same name already exists in the target with identical data and matching
+// labels, it is a no-op. If the data matches but the labels differ, or the data differs, it
+// returns ErrSecretCollision.
+func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secretName, sourceNamespace, targetNamespace string, labels map[string]string, log logrus.FieldLogger) error {
 	srcSecret, err := client.Secrets(sourceNamespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "error getting secret %s/%s", sourceNamespace, secretName)
@@ -79,9 +83,7 @@ func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secret
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
 			Namespace: targetNamespace,
-			Labels: map[string]string{
-				BackupPVCSecretLabel: ownerName,
-			},
+			Labels:    labels,
 		},
 		Type: srcSecret.Type,
 		Data: srcSecret.Data,
@@ -102,12 +104,12 @@ func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secret
 		return errors.Wrapf(err, "error getting existing secret %s/%s", targetNamespace, secretName)
 	}
 
-	if reflect.DeepEqual(existing.Data, srcSecret.Data) && existing.Labels[BackupPVCSecretLabel] == ownerName {
-		log.Infof("Secret %s already exists in %s with same data and owner, skipping copy", secretName, targetNamespace)
+	if reflect.DeepEqual(existing.Data, srcSecret.Data) && labelsMatch(existing.Labels, labels) {
+		log.Infof("Secret %s already exists in %s with same data and labels, skipping copy", secretName, targetNamespace)
 		return nil
 	}
 
-	log.Infof("Secret %s already exists in %s owned by a different DataUpload, collision detected", secretName, targetNamespace)
+	log.Infof("Secret %s already exists in %s owned by a different owner, collision detected", secretName, targetNamespace)
 	return ErrSecretCollision
 }
 
@@ -145,11 +147,11 @@ func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Inter
 	}
 }
 
-// CopyConfigMap copies a configmap from sourceNamespace to targetNamespace.
-// If a configmap with the same name already exists in the target with identical data
-// and the same owner, it is a no-op. If the data matches but a different owner holds
-// it, or the data differs, it returns ErrSecretCollision.
-func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
+// CopyConfigMap copies a configmap from sourceNamespace to targetNamespace, applying the given
+// labels. If a configmap with the same name already exists in the target with identical data and
+// matching labels, it is a no-op. If the data matches but the labels differ, or the data differs,
+// it returns ErrSecretCollision.
+func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmName, sourceNamespace, targetNamespace string, labels map[string]string, log logrus.FieldLogger) error {
 	srcCM, err := client.ConfigMaps(sourceNamespace).Get(ctx, cmName, metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "error getting configmap %s/%s", sourceNamespace, cmName)
@@ -159,9 +161,7 @@ func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmN
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cmName,
 			Namespace: targetNamespace,
-			Labels: map[string]string{
-				BackupPVCSecretLabel: ownerName,
-			},
+			Labels:    labels,
 		},
 		Data:       srcCM.Data,
 		BinaryData: srcCM.BinaryData,
@@ -184,12 +184,12 @@ func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmN
 
 	if reflect.DeepEqual(existing.Data, srcCM.Data) &&
 		reflect.DeepEqual(existing.BinaryData, srcCM.BinaryData) &&
-		existing.Labels[BackupPVCSecretLabel] == ownerName {
-		log.Infof("ConfigMap %s already exists in %s with same data and owner, skipping copy", cmName, targetNamespace)
+		labelsMatch(existing.Labels, labels) {
+		log.Infof("ConfigMap %s already exists in %s with same data and labels, skipping copy", cmName, targetNamespace)
 		return nil
 	}
 
-	log.Infof("ConfigMap %s already exists in %s owned by a different DataUpload, collision detected", cmName, targetNamespace)
+	log.Infof("ConfigMap %s already exists in %s owned by a different owner, collision detected", cmName, targetNamespace)
 	return ErrSecretCollision
 }
 
