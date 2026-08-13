@@ -46,7 +46,7 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	c := &cobra.Command{
 		Use:   use + " NAME",
 		Short: "Create a backup",
-	Args: func(c *cobra.Command, args []string) error {
+		Args: func(c *cobra.Command, args []string) error {
 			if err := cobra.MaximumNArgs(1)(c, args); err != nil {
 				return err
 			}
