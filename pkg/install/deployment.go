@@ -444,6 +444,15 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 								},
 							},
 							Resources: c.resources,
+							SecurityContext: &corev1api.SecurityContext{
+								Capabilities: &corev1api.Capabilities{
+									Drop: []corev1api.Capability{"ALL"},
+								},
+								AllowPrivilegeEscalation: ptr.To(false),
+								SeccompProfile: &corev1api.SeccompProfile{
+									Type: corev1api.SeccompProfileTypeRuntimeDefault,
+								},
+							},
 						},
 					},
 					Volumes: []corev1api.Volume{
