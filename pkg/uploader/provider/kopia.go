@@ -212,6 +212,7 @@ func (kp *kopiaProvider) RunRestore(
 	snapshotID string,
 	volumePath string,
 	incremental bool,
+	_ CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (int64, error) {
