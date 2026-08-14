@@ -245,7 +245,7 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			dp.wgDataPath.Done()
 		}()
 
-		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental, target.VolMode, uploaderConfigs, dp)
+		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental, provider.CBTParam{}, target.VolMode, uploaderConfigs, dp)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)
