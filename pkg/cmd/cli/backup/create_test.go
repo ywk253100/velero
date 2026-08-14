@@ -538,6 +538,20 @@ func TestCreateOptions_Validate(t *testing.T) {
 			args:         []string{},
 			expectError:  false,
 		},
+		{
+			name:         "should pass when schedule name leaves room for timestamp suffix",
+			optName:      "",
+			fromSchedule: strings.Repeat("a", 238), // exactly at the 238-char limit
+			args:         []string{},
+			expectError:  false,
+		},
+		{
+			name:         "should error when schedule name is too long to leave room for timestamp suffix",
+			optName:      "",
+			fromSchedule: strings.Repeat("a", 239), // one over the 238-char limit
+			args:         []string{},
+			expectError:  true,
+		},
 	}
 
 	for _, tc := range testCases {

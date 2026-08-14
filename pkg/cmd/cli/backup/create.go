@@ -216,6 +216,17 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 			return fmt.Errorf("invalid backup name %q: %s", o.Name, strings.Join(errs, "; "))
 		}
 	}
+	// When a backup name will be generated from the schedule (i.e. FromSchedule
+	// is set and no explicit name was given), ensure the schedule name leaves
+	// enough room for the generated timestamp suffix ("-" + 14-digit timestamp,
+	// 15 characters total) within the DNS1123 subdomain length limit.
+	if o.FromSchedule != "" && o.Name == "" {
+		const timestampSuffixLen = 15 // "-" + "20060102150405"
+		maxScheduleNameLen := validation.DNS1123SubdomainMaxLength - timestampSuffixLen
+		if len(o.FromSchedule) > maxScheduleNameLen {
+			return fmt.Errorf("schedule name %q is too long: must be %d characters or fewer to leave room for the generated timestamp suffix", o.FromSchedule, maxScheduleNameLen)
+		}
+	}
 	errs := collections.ValidateNamespaceIncludesExcludes(o.IncludeNamespaces, o.ExcludeNamespaces)
 	if len(errs) > 0 {
 		return kubeerrs.NewAggregate(errs)
