@@ -68,6 +68,16 @@ func TestRestoreExpose(t *testing.T) {
 		},
 	}
 
+	modeBlock := corev1api.PersistentVolumeBlock
+	targetPVObjWithDifferentVolumeMode := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-target-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			VolumeMode: &modeBlock,
+		},
+	}
+
 	modeFilesystem := corev1api.PersistentVolumeFilesystem
 	targetPVCObjWithVolumeMode := &corev1api.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -131,6 +141,7 @@ func TestRestoreExpose(t *testing.T) {
 		expectBackupPod bool
 		expectBackupPVC bool
 		expectCachePVC  bool
+		expectBackupPV  bool
 		err             string
 	}{
 		{
@@ -244,6 +255,96 @@ func TestRestoreExpose(t *testing.T) {
 			},
 			expectBackupPod: true,
 			expectBackupPVC: true,
+		},
+		{
+			name:            "create temporary PV fail",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			targetPVName:    "fake-target-pv",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				targetPVObjWithDifferentVolumeMode,
+				daemonSet,
+				storageClass,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "create",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("fake-create-pv-error")
+					},
+				},
+			},
+			err: "error to create restore pvc: fail to create the temporary PV fake-restore: fake-create-pv-error",
+		},
+		{
+			name:            "delete original PV fail",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			targetPVName:    "fake-target-pv",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				targetPVObjWithDifferentVolumeMode,
+				daemonSet,
+				storageClass,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						deleteAction := action.(clientTesting.DeleteAction)
+						if deleteAction.GetName() == "fake-target-pv" {
+							return true, nil, errors.New("fake-delete-pv-error")
+						}
+						return false, nil, nil
+					},
+				},
+			},
+			err: "error to create restore pvc: fail to delete the target PV fake-target-pv: fake-delete-pv-error",
+		},
+		{
+			name:            "succeed with target PV set and different volume mode",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			targetPVName:    "fake-target-pv",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				targetPVObjWithDifferentVolumeMode,
+				daemonSet,
+				storageClass,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						getAction := action.(clientTesting.GetAction)
+						if getAction.GetName() == "fake-restore" {
+							return true, &corev1api.PersistentVolumeClaim{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      "fake-restore",
+									Namespace: velerov1.DefaultNamespace,
+								},
+								Spec: corev1api.PersistentVolumeClaimSpec{
+									VolumeName: "fake-restore",
+								},
+								Status: corev1api.PersistentVolumeClaimStatus{
+									Phase: corev1api.ClaimBound,
+								},
+							}, nil
+						}
+						return false, nil, nil
+					},
+				},
+			},
+			expectBackupPod: true,
+			expectBackupPVC: true,
+			expectBackupPV:  true,
 		},
 		{
 			name:            "succeed, cache config, no cache volume",
@@ -376,7 +477,7 @@ func TestRestoreExpose(t *testing.T) {
 			if test.expectBackupPod {
 				require.NoError(t, err)
 			} else {
-				require.True(t, apierrors.IsNotFound(err))
+				require.True(t, apierrors.IsNotFound(err), "expected IsNotFound, got %v", err)
 			}
 
 			pvc, err := exposer.kubeClient.CoreV1().PersistentVolumeClaims(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
@@ -387,14 +488,31 @@ func TestRestoreExpose(t *testing.T) {
 					require.Equal(t, corev1api.PersistentVolumeBlock, *pvc.Spec.VolumeMode)
 				}
 			} else {
-				require.True(t, apierrors.IsNotFound(err))
+				require.True(t, apierrors.IsNotFound(err), "expected IsNotFound, got %v", err)
 			}
 
 			_, err = exposer.kubeClient.CoreV1().PersistentVolumeClaims(ownerObject.Namespace).Get(t.Context(), getCachePVCName(ownerObject), metav1.GetOptions{})
 			if test.expectCachePVC {
 				require.NoError(t, err)
 			} else {
-				require.True(t, apierrors.IsNotFound(err))
+				require.True(t, apierrors.IsNotFound(err), "expected IsNotFound, got %v", err)
+			}
+
+			_, err = exposer.kubeClient.CoreV1().PersistentVolumes().Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+			if test.expectBackupPV {
+				require.NoError(t, err)
+			} else {
+				require.True(t, apierrors.IsNotFound(err), "expected IsNotFound, got %v", err)
+			}
+
+			if test.targetPVName != "" && !test.expectBackupPV && test.err == "" {
+				// if targetPVName was provided, and sameVolumeMode was true, the original PV should still exist
+				_, err = exposer.kubeClient.CoreV1().PersistentVolumes().Get(t.Context(), test.targetPVName, metav1.GetOptions{})
+				require.NoError(t, err)
+			} else if test.targetPVName != "" && test.expectBackupPV {
+				// if targetPVName was provided, and sameVolumeMode was false (expectBackupPV is true), the original PV should be deleted
+				_, err = exposer.kubeClient.CoreV1().PersistentVolumes().Get(t.Context(), test.targetPVName, metav1.GetOptions{})
+				require.True(t, apierrors.IsNotFound(err), "expected original PV %s to be deleted, but it still exists", test.targetPVName)
 			}
 		})
 	}

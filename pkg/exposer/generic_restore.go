@@ -890,9 +890,6 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 			Resources:        targetPVC.Spec.Resources,
 		},
 	}
-	if targetPV != nil {
-		pvcObj.Spec.VolumeName = targetPV.Name
-	}
 
 	if selectedNode != "" {
 		if pvcObj.Annotations == nil {
@@ -909,12 +906,56 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 		*pvcObj.Spec.VolumeMode = corev1api.PersistentVolumeBlock
 	}
 
+	volumeName := ""
+	sameVolumeMode := true
+	if targetPV != nil {
+		volumeName = targetPV.Name
+		sameVolumeMode = kube.GetVolumeModeByPVC(pvcObj) == kube.GetVolumeModeByPV(targetPV)
+		if !sameVolumeMode {
+			volumeName = ownerObject.Name
+		}
+		pvcObj.Spec.VolumeName = volumeName
+	}
+
 	restorePVC, err := e.kubeClient.CoreV1().PersistentVolumeClaims(pvcObj.Namespace).Create(ctx, pvcObj, metav1.CreateOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "fail to create the restore PVC %s in namespace %s", pvcObj.Name, pvcObj.Namespace)
 	}
 
+	defer func() {
+		if err != nil {
+			kube.DeletePVCIfAny(ctx, e.kubeClient.CoreV1(), pvcObj.Name, pvcObj.Namespace, 0, e.log)
+		}
+	}()
+
 	if targetPV != nil {
+		if !sameVolumeMode {
+			tmpPV := &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: volumeName,
+				},
+				Spec: *targetPV.Spec.DeepCopy(),
+			}
+			tmpPV.Spec.VolumeMode = restorePVC.Spec.VolumeMode
+			e.log.Infof("the volume mode is different, creating temporary PV %s with volume mode %s", tmpPV.Name, tmpPV.Spec.VolumeMode)
+			tmpPV, err = e.kubeClient.CoreV1().PersistentVolumes().Create(ctx, tmpPV, metav1.CreateOptions{})
+			if err != nil {
+				return nil, errors.Wrapf(err, "fail to create the temporary PV %s", volumeName)
+			}
+
+			defer func() {
+				if err != nil {
+					kube.DeletePVIfAny(ctx, e.kubeClient.CoreV1(), tmpPV.Name, e.log)
+				}
+			}()
+
+			e.log.Infof("deleting the target PV %s", targetPV.Name)
+			if err = e.kubeClient.CoreV1().PersistentVolumes().Delete(ctx, targetPV.Name, metav1.DeleteOptions{}); err != nil {
+				return nil, errors.Wrapf(err, "fail to delete the target PV %s", targetPV.Name)
+			}
+			targetPV = tmpPV
+		}
+
 		if _, err = kube.ResetPVBinding(ctx, e.kubeClient.CoreV1(), targetPV, nil, restorePVC); err != nil {
 			return nil, errors.Wrapf(err, "fail to reset PV %s binding to restore PVC %s/%s", targetPV.Name, restorePVC.Namespace, restorePVC.Name)
 		}
