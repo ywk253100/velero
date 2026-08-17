@@ -164,6 +164,9 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 		}
 	}
 
+	// Delete any user-provided credentialsFile to prevent path traversal vulnerabilities
+	delete(objectStoreConfig, "credentialsFile")
+
 	// add the bucket name and prefix to the config map so that object stores
 	// can use them when initializing. The AWS object store uses the bucket
 	// name to determine the bucket's region when setting up its client.
