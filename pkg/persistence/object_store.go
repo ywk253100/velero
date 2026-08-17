@@ -94,6 +94,7 @@ type BackupStore interface {
 
 // DownloadURLTTL is how long a download URL is valid for.
 const DownloadURLTTL = 10 * time.Minute
+const maxDecompressedSize = 1024 * 1024 * 1024 // 1 GB
 
 type objectBackupStore struct {
 	objectStore velero.ObjectStore
@@ -323,7 +324,8 @@ func (s *objectBackupStore) GetBackupMetadata(name string) (*velerov1api.Backup,
 	}
 	defer res.Close()
 
-	data, err := io.ReadAll(res)
+	limitReader := io.LimitReader(res, maxDecompressedSize)
+	data, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -434,7 +436,9 @@ func decode(jsongzReader io.Reader, into any) error {
 	}
 	defer gzr.Close()
 
-	if err := json.NewDecoder(gzr).Decode(into); err != nil {
+	limitReader := io.LimitReader(gzr, maxDecompressedSize)
+
+	if err := json.NewDecoder(limitReader).Decode(into); err != nil {
 		return errors.Wrap(err, "error decoding object data")
 	}
 
