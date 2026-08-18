@@ -199,7 +199,7 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 	// Copy secrets and configmaps from the target namespace to the Velero namespace if configured.
 	// These are needed by CSI drivers that require namespace-scoped resources for volume
 	// provisioning of the restorePVC (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
-	copyLabels := map[string]string{BackupPVCSecretLabel: ownerObject.Name}
+	copyLabels := map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)}
 	for _, secretName := range param.RestorePVCConfig.SecretNames {
 		if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
 			param.TargetNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
@@ -220,9 +220,9 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 	defer func() {
 		if err != nil {
 			kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-				BackupPVCSecretLabel, ownerObject.Name, curLog)
+				BackupPVCSecretLabel, string(ownerObject.UID), curLog)
 			kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-				BackupPVCSecretLabel, ownerObject.Name, curLog)
+				BackupPVCSecretLabel, string(ownerObject.UID), curLog)
 		}
 	}()
 
@@ -429,9 +429,9 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), cachePVCName, ownerObject.Namespace, 0, e.log)
 
 	kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 }
 
 func (e *genericRestoreExposer) RebindVolume(ctx context.Context, ownerObject corev1api.ObjectReference, param GenericRestoreRebindVolumeParam) error {

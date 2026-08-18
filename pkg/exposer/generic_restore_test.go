@@ -411,12 +411,12 @@ func TestRestoreExpose_SecretCopy(t *testing.T) {
 		copiedSecret, err := fakeKubeClient.CoreV1().Secrets(ownerObject.Namespace).Get(t.Context(), "kms-token", metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, []byte("vault-token"), copiedSecret.Data["token"])
-		assert.Equal(t, ownerObject.Name, copiedSecret.Labels[BackupPVCSecretLabel])
+		assert.Equal(t, string(ownerObject.UID), copiedSecret.Labels[BackupPVCSecretLabel])
 
 		copiedCM, err := fakeKubeClient.CoreV1().ConfigMaps(ownerObject.Namespace).Get(t.Context(), "kms-config", metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, "https://vault.example.com", copiedCM.Data["vaultAddress"])
-		assert.Equal(t, ownerObject.Name, copiedCM.Labels[BackupPVCSecretLabel])
+		assert.Equal(t, string(ownerObject.UID), copiedCM.Labels[BackupPVCSecretLabel])
 	})
 
 	t.Run("returns error when source secret missing", func(t *testing.T) {

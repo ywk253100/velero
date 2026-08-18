@@ -45,7 +45,8 @@ import (
 )
 
 // BackupPVCSecretLabel is the label applied to secrets and configmaps copied to the
-// Velero namespace for backup PVC provisioning. The value is the owning DataUpload name.
+// Velero namespace for backup PVC provisioning. The value is the owning DataUpload/DataDownload
+// UID, which is a stable, valid label value (the owner name may exceed the label-value limit).
 const BackupPVCSecretLabel = "velero.io/backup-pvc-secret" //nolint:gosec // not a credential
 
 // CSISnapshotExposeParam define the input param for Expose of CSI snapshots
@@ -166,7 +167,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 	// These are needed by CSI drivers that require namespace-scoped resources for volume
 	// provisioning (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
 	if value, exists := csiExposeParam.BackupPVCConfig[csiExposeParam.StorageClass]; exists {
-		copyLabels := map[string]string{BackupPVCSecretLabel: ownerObject.Name}
+		copyLabels := map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)}
 		for _, secretName := range value.SecretNames {
 			if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
 				csiExposeParam.SourceNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
@@ -541,9 +542,9 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), backupPVCName, ownerObject.Namespace, cleanUpTimeout, e.log)
 
 	kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
-		BackupPVCSecretLabel, ownerObject.Name, e.log)
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)

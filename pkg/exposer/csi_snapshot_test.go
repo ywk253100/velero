@@ -2278,7 +2278,7 @@ func TestExpose_SecretCopy(t *testing.T) {
 			t.Context(), "kms-token", metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, []byte("vault-token"), copied.Data["token"])
-		assert.Equal(t, ownerObject.Name, copied.Labels[BackupPVCSecretLabel])
+		assert.Equal(t, string(ownerObject.UID), copied.Labels[BackupPVCSecretLabel])
 	})
 
 	t.Run("copies configmap from source namespace", func(t *testing.T) {
@@ -2306,7 +2306,7 @@ func TestExpose_SecretCopy(t *testing.T) {
 			t.Context(), "kms-config", metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, "https://vault.example.com", copied.Data["vaultAddress"])
-		assert.Equal(t, ownerObject.Name, copied.Labels[BackupPVCSecretLabel])
+		assert.Equal(t, string(ownerObject.UID), copied.Labels[BackupPVCSecretLabel])
 	})
 
 	t.Run("returns error when source secret missing", func(t *testing.T) {
@@ -2342,21 +2342,21 @@ func TestCleanUp_SecretsAndConfigMaps(t *testing.T) {
 	secret := &corev1api.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kms-token", Namespace: "velero",
-			Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+			Labels: map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)},
 			UID:    "secret-uid",
 		},
 	}
 	cm := &corev1api.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kms-config", Namespace: "velero",
-			Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+			Labels: map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)},
 			UID:    "cm-uid",
 		},
 	}
 	unrelatedSecret := &corev1api.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "other-secret", Namespace: "velero",
-			Labels: map[string]string{BackupPVCSecretLabel: "du-456"},
+			Labels: map[string]string{BackupPVCSecretLabel: "other-owner-uid"},
 			UID:    "other-uid",
 		},
 	}
