@@ -326,8 +326,10 @@ func (ms *microServiceBRWatcher) startWatch() {
 		} else {
 			if strings.HasSuffix(terminateMessage, ErrCancelled) {
 				ms.callbacks.OnCancelled(ms.ctx, ms.namespace, ms.taskName)
-			} else {
+			} else if terminateMessage != "" {
 				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(terminateMessage))
+			} else {
+				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(lastPod.Status.Message))
 			}
 		}
 
