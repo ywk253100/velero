@@ -437,8 +437,8 @@ func TestStartWatch(t *testing.T) {
 
 			ms.wgWatcher.Wait()
 
-			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent)
-			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent)
+			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent.Load())
+			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent.Load())
 			assert.Equal(t, test.expectComplete, sw.complete)
 			assert.Equal(t, test.expectCancel, sw.canceled)
 			assert.Equal(t, test.expectFail, sw.failed)
