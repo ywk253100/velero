@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -72,8 +73,8 @@ type microServiceBRWatcher struct {
 	associatedObject    string
 	eventCh             chan *corev1api.Event
 	podCh               chan *corev1api.Pod
-	startedFromEvent    bool
-	terminatedFromEvent bool
+	startedFromEvent    atomic.Bool
+	terminatedFromEvent atomic.Bool
 	wgWatcher           sync.WaitGroup
 	eventInformer       ctrlcache.Informer
 	podInformer         ctrlcache.Informer
@@ -285,7 +286,7 @@ func (ms *microServiceBRWatcher) startWatch() {
 		}
 
 	epilogLoop:
-		for !ms.startedFromEvent || !ms.terminatedFromEvent {
+		for !ms.startedFromEvent.Load() || !ms.terminatedFromEvent.Load() {
 			select {
 			case <-ms.ctx.Done():
 				ms.log.Warn("Watch loop is canceled on waiting final event")
@@ -303,11 +304,11 @@ func (ms *microServiceBRWatcher) startWatch() {
 
 		logger.Infof("Finish waiting data path pod, phase %s, message %s", lastPod.Status.Phase, terminateMessage)
 
-		if !ms.startedFromEvent {
+		if !ms.startedFromEvent.Load() {
 			logger.Warn("VGDP seems not started")
 		}
 
-		if ms.startedFromEvent && !ms.terminatedFromEvent {
+		if ms.startedFromEvent.Load() && !ms.terminatedFromEvent.Load() {
 			logger.Warn("VGDP started but termination event is not received")
 		}
 
@@ -340,7 +341,7 @@ func (ms *microServiceBRWatcher) startWatch() {
 func (ms *microServiceBRWatcher) onEvent(evt *corev1api.Event) {
 	switch evt.Reason {
 	case EventReasonStarted:
-		ms.startedFromEvent = true
+		ms.startedFromEvent.Store(true)
 		ms.log.Infof("Received data path start message: %s", evt.Message)
 	case EventReasonProgress:
 		ms.callbacks.OnProgress(ms.ctx, ms.namespace, ms.taskName, funcGetProgressFromMessage(evt.Message, ms.log))
@@ -353,7 +354,7 @@ func (ms *microServiceBRWatcher) onEvent(evt *corev1api.Event) {
 	case EventReasonCancelling:
 		ms.log.Infof("Received data path canceling message: %s", evt.Message)
 	case EventReasonStopped:
-		ms.terminatedFromEvent = true
+		ms.terminatedFromEvent.Store(true)
 		ms.log.Infof("Received data path stop message: %s", evt.Message)
 	default:
 		ms.log.Infof("Received event for data path %s, reason: %s, message: %s", ms.taskName, evt.Reason, evt.Message)
