@@ -80,9 +80,10 @@ A sample of `backupPVC` config as part of the ConfigMap would look like:
 ```
 
 **Note on encrypted volumes:** the copied secrets/configmaps are labeled `velero.io/backup-pvc-secret=<DataUpload UID>` and
-deleted when the DataUpload completes (or on failure). If concurrent DataUploads from different namespaces need a secret with the
-same name but different content in the Velero namespace, they conflict; for ceph-csi this can be avoided by configuring a
-per-namespace `tenantTokenName` so each namespace uses a unique secret name.
+deleted when the DataUpload completes (or on failure). If concurrent DataUploads from different namespaces need a secret with the same
+name but different content in the Velero namespace, they conflict. For ceph-csi,
+this can be avoided by configuring a unique
+[`tenantTokenName` per tenant](https://github.com/ceph/ceph-csi/blob/devel/docs/design/proposals/encryption-with-vault-tokens.md#example-of-the-kms-configuration-file-for-vault-tokens).
 
 **Note:** 
 - Users should make sure that the storage class specified in `backupPVC` config should exist in the cluster and can be used by the
