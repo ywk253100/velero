@@ -163,9 +163,9 @@ func (bp *blockProvider) RunRestore(
 	cbtParam CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
-	updater uploader.ProgressUpdater) (int64, error) {
+	updater uploader.ProgressUpdater) (int64, int64, error) {
 	if updater == nil {
-		return 0, errors.New("restore progress updater is invalid")
+		return 0, 0, errors.New("restore progress updater is invalid")
 	}
 
 	log := bp.log.WithFields(logrus.Fields{
@@ -176,23 +176,23 @@ func (bp *blockProvider) RunRestore(
 
 	blkUploader := block.NewUploader(ctx, bp.bkRepo, updater, log)
 
-	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, incremental, cbtParam.Source, cbtParam.Service, uploaderCfg, log)
+	incrementalBytes, totalBytes, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, incremental, cbtParam.Source, cbtParam.Service, uploaderCfg, log)
 
 	if err == block.ErrCanceled {
 		log.Warn("Block restore is canceled")
-		return 0, ErrorCanceled
+		return 0, 0, ErrorCanceled
 	}
 
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to run block restore")
+		return 0, 0, errors.Wrapf(err, "Failed to run block restore")
 	}
 
 	updater.UpdateProgress(&uploader.Progress{
-		TotalBytes: size,
-		BytesDone:  size,
+		TotalBytes: totalBytes,
+		BytesDone:  totalBytes,
 	})
 
-	log.Infof("Block restore finished, restore size %v", size)
+	log.Infof("Block restore finished, restore incremental size %v, total size %v", incrementalBytes, totalBytes)
 
-	return size, nil
+	return incrementalBytes, totalBytes, nil
 }

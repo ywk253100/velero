@@ -59,27 +59,27 @@ import (
 
 // DataDownloadReconciler reconciles a DataDownload object
 type DataDownloadReconciler struct {
-	client                client.Client
-	kubeClient            kubernetes.Interface
-	mgr                   manager.Manager
-	logger                logrus.FieldLogger
-	Clock                 clock.WithTickerAndDelayedExecution
-	restoreExposer        exposer.GenericRestoreExposer
-	nodeName              string
-	dataPathMgr           *datapath.Manager
-	vgdpCounter           *exposer.VgdpCounter
-	loadAffinity          []*kube.LoadAffinity
-	restorePVCConfig      velerotypes.RestorePVC
-	backupRepoConfigs     map[string]string
-	cacheVolumeConfigs    *velerotypes.CachePVC
-	podResources          corev1api.ResourceRequirements
-	preparingTimeout      time.Duration
-	metrics               *metrics.ServerMetrics
-	cancelledDataDownload sync.Map
-	dataMovePriorityClass string
-	repoConfigMgr         repository.ConfigManager
-	podLabels             map[string]string
-	podAnnotations        map[string]string
+	client                         client.Client
+	kubeClient                     kubernetes.Interface
+	mgr                            manager.Manager
+	logger                         logrus.FieldLogger
+	Clock                          clock.WithTickerAndDelayedExecution
+	restoreExposer                 exposer.GenericRestoreExposer
+	nodeName                       string
+	dataPathMgr                    *datapath.Manager
+	vgdpCounter                    *exposer.VgdpCounter
+	loadAffinity                   []*kube.LoadAffinity
+	restorePVCConfig               velerotypes.RestorePVC
+	backupRepoConfigs              map[string]string
+	cacheVolumeConfigs             *velerotypes.CachePVC
+	podResources                   corev1api.ResourceRequirements
+	preparingTimeout               time.Duration
+	metrics                        *metrics.ServerMetrics
+	cancelledDataDownload          sync.Map
+	dataMovePriorityClass          string
+	repoConfigMgr                  repository.ConfigManager
+	podLabels                      map[string]string
+	podAnnotations                 map[string]string
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
 }
 
@@ -105,26 +105,26 @@ func NewDataDownloadReconciler(
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
 ) *DataDownloadReconciler {
 	return &DataDownloadReconciler{
-		client:                client,
-		kubeClient:            kubeClient,
-		mgr:                   mgr,
-		logger:                logger.WithField("controller", "DataDownload"),
-		Clock:                 &clock.RealClock{},
-		nodeName:              nodeName,
-		restoreExposer:        exposer.NewGenericRestoreExposer(kubeClient, client, logger),
-		restorePVCConfig:      restorePVCConfig,
-		backupRepoConfigs:     backupRepoConfigs,
-		cacheVolumeConfigs:    cacheVolumeConfigs,
-		dataPathMgr:           dataPathMgr,
-		vgdpCounter:           counter,
-		loadAffinity:          loadAffinity,
-		podResources:          podResources,
-		preparingTimeout:      preparingTimeout,
-		metrics:               metrics,
-		dataMovePriorityClass: dataMovePriorityClass,
-		repoConfigMgr:         repoConfigMgr,
-		podLabels:             podLabels,
-		podAnnotations:        podAnnotations,
+		client:                         client,
+		kubeClient:                     kubeClient,
+		mgr:                            mgr,
+		logger:                         logger.WithField("controller", "DataDownload"),
+		Clock:                          &clock.RealClock{},
+		nodeName:                       nodeName,
+		restoreExposer:                 exposer.NewGenericRestoreExposer(kubeClient, client, logger),
+		restorePVCConfig:               restorePVCConfig,
+		backupRepoConfigs:              backupRepoConfigs,
+		cacheVolumeConfigs:             cacheVolumeConfigs,
+		dataPathMgr:                    dataPathMgr,
+		vgdpCounter:                    counter,
+		loadAffinity:                   loadAffinity,
+		podResources:                   podResources,
+		preparingTimeout:               preparingTimeout,
+		metrics:                        metrics,
+		dataMovePriorityClass:          dataMovePriorityClass,
+		repoConfigMgr:                  repoConfigMgr,
+		podLabels:                      podLabels,
+		podAnnotations:                 podAnnotations,
 		snapshotMetadataServiceConfigs: snapshotMetadataServiceConfigs,
 	}
 }
@@ -498,6 +498,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 		}
 
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseCompleted
+		dd.Status.IncrementalBytes = result.Restore.IncrementalBytes
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
@@ -938,22 +939,22 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 	}
 
 	return exposer.GenericRestoreExposeParam{
-		TargetPVCName:         dd.Spec.TargetVolume.PVC,
-		TargetPVName:          dd.Spec.TargetVolume.PV,
-		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
-		HostingPodLabels:      hostingPodLabels,
-		HostingPodAnnotations: hostingPodAnnotation,
-		HostingPodTolerations: hostingPodTolerations,
-		Resources:             r.podResources,
-		OperationTimeout:      dd.Spec.OperationTimeout.Duration,
-		ExposeTimeout:         r.preparingTimeout,
-		NodeOS:                nodeOS,
-		RestorePVCConfig:      r.restorePVCConfig,
-		LoadAffinity:          r.loadAffinity,
-		PriorityClassName:     r.dataMovePriorityClass,
-		RestoreSize:           dd.Spec.SnapshotSize,
-		CacheVolume:           cacheVolume,
-		DataMover:             dd.Spec.DataMover,
+		TargetPVCName:                  dd.Spec.TargetVolume.PVC,
+		TargetPVName:                   dd.Spec.TargetVolume.PV,
+		TargetNamespace:                dd.Spec.TargetVolume.Namespace,
+		HostingPodLabels:               hostingPodLabels,
+		HostingPodAnnotations:          hostingPodAnnotation,
+		HostingPodTolerations:          hostingPodTolerations,
+		Resources:                      r.podResources,
+		OperationTimeout:               dd.Spec.OperationTimeout.Duration,
+		ExposeTimeout:                  r.preparingTimeout,
+		NodeOS:                         nodeOS,
+		RestorePVCConfig:               r.restorePVCConfig,
+		LoadAffinity:                   r.loadAffinity,
+		PriorityClassName:              r.dataMovePriorityClass,
+		RestoreSize:                    dd.Spec.SnapshotSize,
+		CacheVolume:                    cacheVolume,
+		DataMover:                      dd.Spec.DataMover,
 		SnapshotMetadataServiceConfigs: r.snapshotMetadataServiceConfigs,
 	}, nil
 }

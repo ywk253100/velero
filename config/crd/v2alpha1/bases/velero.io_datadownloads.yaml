@@ -21,6 +21,10 @@ spec:
       jsonPath: .status.phase
       name: Status
       type: string
+    - description: Restore type such as Full/Incremental
+      jsonPath: .spec.restoreType
+      name: Restore Type
+      type: string
     - description: Time duration since this DataDownload was started
       jsonPath: .status.startTimestamp
       name: Started
@@ -34,6 +38,11 @@ spec:
       format: int64
       jsonPath: .status.progress.totalBytes
       name: Total Bytes
+      type: integer
+    - description: Incremental bytes
+      format: int64
+      jsonPath: .status.incrementalBytes
+      name: Incremental Bytes
       type: integer
     - description: Name of the Backup Storage Location where the backup data is stored
       jsonPath: .spec.backupStorageLocation
@@ -207,6 +216,11 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              incrementalBytes:
+                description: IncrementalBytes holds the number of bytes new or changed
+                  since the last snapshot
+                format: int64
+                type: integer
               message:
                 description: Message is a message about the DataDownload's status.
                 type: string
