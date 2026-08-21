@@ -113,10 +113,10 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `MIGRATE_FROM_VELERO_VERSION `: `-migrate-from-velero-version`. Optional.
 1. `ADDITIONAL_BSL_PLUGINS `: `-additional-bsl-plugins`. Optional.
 1. `ADDITIONAL_OBJECT_STORE_PROVIDER`: `-additional-bsl-object-store-provider`. Optional.
-1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-bucket`. Optional.
-1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-prefix`. Optional.
-1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-config`. Optional.
-1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-bucket`. Optional.
+1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-prefix`. Optional.
+1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-config`. Optional.
 1. `FEATURES`: `-features`. Optional.
 1. `REGISTRY_CREDENTIAL_FILE`: `-registry-credential-file`. Optional.
 1. `KIBISHII_DIRECTORY`: `-kibishii-directory`. Optional.
