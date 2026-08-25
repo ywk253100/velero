@@ -39,6 +39,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	serverconfig "github.com/vmware-tanzu/velero/pkg/cmd/server/config"
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
@@ -374,19 +375,20 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// failures due to the PVC not being bound, which could cause a timeout and result in a failed restore.
 					if pvc.Status.Phase == corev1api.ClaimPending {
 						// check if storage class used has VolumeBindingMode as WaitForFirstConsumer
-						scName := *pvc.Spec.StorageClassName
-						sc := &storagev1api.StorageClass{}
-						err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
+						if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+							scName := *pvc.Spec.StorageClassName
+							sc := &storagev1api.StorageClass{}
+							err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
 
-						if err != nil {
-							errs.Add(restoredNamespace, err)
-							return false, err
-						}
-						// skip PV patch step for this scenario
-						// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
-						if *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
-							log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
-							return true, nil
+							if err != nil {
+								return false, err
+							}
+							// skip PV patch step for this scenario
+							// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
+							if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
+								log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
+								return true, nil
+							}
 						}
 					}
 
@@ -576,8 +578,18 @@ func (ctx *finalizerContext) WaitRestoreExecHook() (errs results.Result) {
 	log := ctx.logger.WithField("restore", ctx.restore.Name)
 	log.Info("Waiting for restore exec hooks starts")
 
-	// wait for restore exec hooks to finish
-	err := wait.PollUntilContextCancel(context.Background(), 1*time.Second, true, func(context.Context) (bool, error) {
+	// Bound the wait by resourceTimeout (the same budget Velero already
+	// applies to other finalizer phases). Previously this poll had no
+	// deadline, so a hook that was registered via Add() but never
+	// recorded as executed left the restore stuck in Finalizing forever
+	// and blocked every other restore on the cluster.
+	timeout := ctx.resourceTimeout
+	if timeout <= 0 {
+		timeout = serverconfig.DefaultResourceTimeout
+	}
+	pollCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := wait.PollUntilContextCancel(pollCtx, 1*time.Second, true, func(context.Context) (bool, error) {
 		log.Debug("Checking the progress of hooks execution")
 		if ctx.multiHookTracker.IsComplete(ctx.restore.Name) {
 			return true, nil
