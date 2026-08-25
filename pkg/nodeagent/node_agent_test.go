@@ -433,8 +433,7 @@ func TestIsReadyBothDaemonsetsGetError(t *testing.T) {
 		Build()
 
 	err := IsReady(t.Context(), "fake-ns", fakeClient)
-	require.Error(t, err)
-	assert.EqualError(t, err, "failed to get linux node-agent daemonset: fake-linux-get-error")
+	require.EqualError(t, err, "failed to get linux node-agent daemonset: fake-linux-get-error")
 	assert.Contains(t, fmt.Sprintf("%+v", err), "failed to get windows node-agent daemonset: fake-windows-get-error")
 }
 
