@@ -276,6 +276,52 @@ func TestIsReady(t *testing.T) {
 			expectErr: "failed to get windows node-agent daemonset: fake-get-error",
 		},
 		{
+			name:      "linux daemonset get error but windows ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsWindowsReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+		},
+		{
+			name:      "windows daemonset get error but linux ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsLinuxReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent-windows" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+		},
+		{
+			name:      "linux daemonset get error and windows not ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsWindowsNotReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+			expectErr: "failed to get linux node-agent daemonset: fake-get-error",
+		},
+		{
 			name:      "linux ds exist but no ready pods",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
