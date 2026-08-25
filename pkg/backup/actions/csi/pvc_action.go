@@ -351,7 +351,7 @@ func (p *pvcBackupItemAction) Execute(
 	// created but never processed (the DataUpload controller runs inside node-agent),
 	// causing the backup to hang until itemOperationTimeout expires.
 	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) && datamover.IsBuiltInDataMover(backup.Spec.DataMover) {
-		if err := nodeagent.IsReady(ctx, backup.Namespace, p.crClient, p.log); err != nil {
+		if err := nodeagent.IsReady(ctx, backup.Namespace, p.crClient); err != nil {
 			p.log.WithError(err).Error("cannot perform snapshot data movement without running node-agent pods")
 			return nil, nil, "", nil, errors.Wrap(err, "CSI PVC BIA cannot proceed: node-agent is not ready for snapshot data movement")
 		}
