@@ -100,9 +100,7 @@ func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) 
 	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, dsWindows); err != nil {
 		dsWindows = nil
 		if !apierrors.IsNotFound(err) {
-			if lookupErr == nil {
-				lookupErr = errors.Wrap(err, "failed to get windows node-agent daemonset")
-			}
+			lookupErr = errors.CombineErrors(lookupErr, errors.Wrap(err, "failed to get windows node-agent daemonset"))
 		}
 	}
 

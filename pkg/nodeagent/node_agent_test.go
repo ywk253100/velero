@@ -18,6 +18,7 @@ package nodeagent
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -406,6 +407,35 @@ func TestIsReady(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIsReadyBothDaemonsetsGetError ensures that when both daemonset lookups
+// return a non-NotFound error, the linux error is returned as the primary
+// error while the windows error is retained as a secondary/attached error
+// rather than being silently discarded.
+func TestIsReadyBothDaemonsetsGetError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	appsv1api.AddToScheme(scheme)
+
+	fakeClient := clientFake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+				if key.Name == "node-agent" {
+					return errors.New("fake-linux-get-error")
+				}
+				if key.Name == "node-agent-windows" {
+					return errors.New("fake-windows-get-error")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	err := IsReady(t.Context(), "fake-ns", fakeClient)
+	require.Error(t, err)
+	assert.EqualError(t, err, "failed to get linux node-agent daemonset: fake-linux-get-error")
+	assert.Contains(t, fmt.Sprintf("%+v", err), "failed to get windows node-agent daemonset: fake-windows-get-error")
 }
 
 func TestGetPodSpec(t *testing.T) {
