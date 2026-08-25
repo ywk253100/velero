@@ -63,12 +63,14 @@ type RestoreMicroService struct {
 	ddHandler  cachetool.ResourceEventHandlerRegistration
 	nodeName   string
 	cacheDir   string
+
+	volumeID   string
 	cbtService cbtservice.Service
 }
 
 func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataDownloadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	ddInformer cache.Informer, cacheDir string, cbtService cbtservice.Service, log logrus.FieldLogger) *RestoreMicroService {
+	ddInformer cache.Informer, cacheDir string, volumeID string, cbtService cbtservice.Service, log logrus.FieldLogger) *RestoreMicroService {
 	return &RestoreMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -84,6 +86,7 @@ func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClien
 		resultSignal:     make(chan dataPathResult),
 		ddInformer:       ddInformer,
 		cacheDir:         cacheDir,
+		volumeID:         volumeID,
 		cbtService:       cbtService,
 	}
 }
@@ -190,7 +193,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	if dd.Spec.CSISnapshot != nil {
 		param.VolumeSnapshotNamespace = dd.Spec.CSISnapshot.VolumeSnapshotNamespace
 		param.VolumeSnapshotName = dd.Spec.CSISnapshot.VolumeSnapshot
-		param.VolumeID = dd.Spec.CSISnapshot.VolumeID
+		param.VolumeID = r.volumeID
 	}
 	if err := dp.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig, param); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")

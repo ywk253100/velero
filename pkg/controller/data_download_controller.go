@@ -490,7 +490,9 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	log.Info("Cleaning up exposed environment")
-	r.restoreExposer.CleanUp(ctx, &dd)
+	r.restoreExposer.CleanUp(ctx, objRef, &exposer.GenericRestoreCleanUpParam{
+		DataDownload: &dd,
+	})
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -539,7 +541,9 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		return
 	}
 	// cleans up any objects generated during the snapshot expose
-	r.restoreExposer.CleanUp(ctx, &dd)
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(&dd), &exposer.GenericRestoreCleanUpParam{
+		DataDownload: &dd,
+	})
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -589,7 +593,9 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 
 	// success update
 	r.metrics.RegisterDataDownloadCancel(r.nodeName)
-	r.restoreExposer.CleanUp(ctx, dd)
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+		DataDownload: dd,
+	})
 
 	log.Warn("data download is canceled")
 
@@ -737,7 +743,9 @@ func (r *DataDownloadReconciler) prepareDataDownload(ssb *velerov2alpha1api.Data
 
 func (r *DataDownloadReconciler) errorOut(ctx context.Context, dd *velerov2alpha1api.DataDownload, err error, msg string, log logrus.FieldLogger) (ctrl.Result, error) {
 	if r.restoreExposer != nil {
-		r.restoreExposer.CleanUp(ctx, dd)
+		r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+			DataDownload: dd,
+		})
 	}
 	return ctrl.Result{}, r.updateStatusToFailed(ctx, dd, err, msg, log)
 }
@@ -827,7 +835,9 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 		log.Warnf("[Diagnose DD expose]%s", diag)
 	}
 
-	r.restoreExposer.CleanUp(ctx, dd)
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+		DataDownload: dd,
+	})
 
 	log.Info("Datadownload has been cleaned up")
 
@@ -938,23 +948,26 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 	}
 
 	return exposer.GenericRestoreExposeParam{
-		TargetPVCName:                  dd.Spec.TargetVolume.PVC,
-		TargetPVName:                   dd.Spec.TargetVolume.PV,
-		TargetNamespace:                dd.Spec.TargetVolume.Namespace,
-		HostingPodLabels:               hostingPodLabels,
-		HostingPodAnnotations:          hostingPodAnnotation,
-		HostingPodTolerations:          hostingPodTolerations,
-		Resources:                      r.podResources,
-		OperationTimeout:               dd.Spec.OperationTimeout.Duration,
-		ExposeTimeout:                  r.preparingTimeout,
-		NodeOS:                         nodeOS,
-		RestorePVCConfig:               r.restorePVCConfig,
-		LoadAffinity:                   r.loadAffinity,
-		PriorityClassName:              r.dataMovePriorityClass,
-		RestoreSize:                    dd.Spec.SnapshotSize,
-		CacheVolume:                    cacheVolume,
-		DataMover:                      dd.Spec.DataMover,
-		SnapshotMetadataServiceConfigs: r.snapshotMetadataServiceConfigs,
+		TargetPVCName:         dd.Spec.TargetVolume.PVC,
+		TargetPVName:          dd.Spec.TargetVolume.PV,
+		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
+		HostingPodLabels:      hostingPodLabels,
+		HostingPodAnnotations: hostingPodAnnotation,
+		HostingPodTolerations: hostingPodTolerations,
+		Resources:             r.podResources,
+		OperationTimeout:      dd.Spec.OperationTimeout.Duration,
+		ExposeTimeout:         r.preparingTimeout,
+		NodeOS:                nodeOS,
+		RestorePVCConfig:      r.restorePVCConfig,
+		LoadAffinity:          r.loadAffinity,
+		PriorityClassName:     r.dataMovePriorityClass,
+		RestoreSize:           dd.Spec.SnapshotSize,
+		CacheVolume:           cacheVolume,
+		DataMover:             dd.Spec.DataMover,
+		CSI: &exposer.GenericRestoreExposeCSI{
+			Snapshot:                       dd.Spec.CSISnapshot,
+			SnapshotMetadataServiceConfigs: r.snapshotMetadataServiceConfigs,
+		},
 	}, nil
 }
 

@@ -1592,7 +1592,8 @@ func TestCreateRestorePod(t *testing.T) {
 				test.affinity,
 				"", // priority class name
 				nil,
-				"",
+				"", // volumeSnapshotNamespace
+				"", // volumeID
 				nil,
 			)
 

@@ -96,9 +96,6 @@ type CSISnapshotSpec struct {
 	// Driver is the driver used by the VolumeSnapshotContent
 	// +optional
 	Driver string `json:"driver,omitempty"`
-
-	// VolumeID is the ID of the volume that the volume snapshot is created from
-	VolumeID string `json:"volumeID,omitempty"`
 }
 
 // DataUploadPhase represents the lifecycle phase of a DataUpload.

@@ -149,7 +149,8 @@ func TestCreateRestorePodWithPriorityClass(t *testing.T) {
 				nil, // affinity
 				tc.expectedPriorityClass,
 				nil,
-				"",
+				"", // volumeSnapshotNamespace
+				"", // volumeID
 				nil,
 			)
 
@@ -231,7 +232,8 @@ func TestCreateRestorePodWithMissingConfigMap(t *testing.T) {
 		nil, // affinity
 		"",  // empty priority class since config map is missing
 		nil,
-		"",
+		"", // volumeSnapshotNamespace
+		"", // volumeID
 		nil,
 	)
 
