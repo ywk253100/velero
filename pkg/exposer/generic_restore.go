@@ -286,7 +286,8 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 
 		selectedNode = ""
 
-		restorePV, err := kube.WaitPVCBound(ctx, e.kubeClient.CoreV1(), e.kubeClient.CoreV1(), restorePVC.Name, restorePVC.Namespace, param.ExposeTimeout)
+		var restorePV *corev1api.PersistentVolume
+		restorePV, err = kube.WaitPVCBound(ctx, e.kubeClient.CoreV1(), e.kubeClient.CoreV1(), restorePVC.Name, restorePVC.Namespace, param.ExposeTimeout)
 		if err != nil {
 			return errors.Wrap(err, "error waiting for restore PVC bound")
 		}
@@ -309,7 +310,8 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 			return errors.Wrapf(err, "error to get volume snapshot %s/%s", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot)
 		}
 
-		vsc, err := csi.GetVSCForVS(ctx, vs, e.ctrlClient)
+		var vsc *snapshotv1api.VolumeSnapshotContent
+		vsc, err = csi.GetVSCForVS(ctx, vs, e.ctrlClient)
 		if err != nil {
 			return errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
 		}
