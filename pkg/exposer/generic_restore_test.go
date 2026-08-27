@@ -106,6 +106,65 @@ func TestRestoreExpose(t *testing.T) {
 		},
 	}
 
+	targetPVCObjWithNode := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "fake-ns",
+			Name:      "fake-target-pvc-with-node",
+			Annotations: map[string]string{
+				"volume.kubernetes.io/selected-node": "fake-node",
+			},
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+		},
+	}
+
+	volumeBindingMode := storagev1api.VolumeBindingWaitForFirstConsumer
+	storageClassWaitForFirstConsumer := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-sc",
+		},
+		VolumeBindingMode: &volumeBindingMode,
+	}
+
+	restorePVCObjBound := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1.DefaultNamespace,
+			Name:      "fake-restore",
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			VolumeName:       "fake-restore-pv",
+			StorageClassName: &scName,
+		},
+		Status: corev1api.PersistentVolumeClaimStatus{
+			Phase: corev1api.ClaimBound,
+		},
+	}
+
+	restorePVObjWithTopology := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-restore-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			StorageClassName: "fake-sc",
+			NodeAffinity: &corev1api.VolumeNodeAffinity{
+				Required: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key:      "topology.kubernetes.io/zone",
+									Operator: corev1api.NodeSelectorOpIn,
+									Values:   []string{"zone-1"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
 	daemonSet := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "velero",
@@ -248,6 +307,33 @@ func TestRestoreExpose(t *testing.T) {
 									Phase: corev1api.ClaimBound,
 								},
 							}, nil
+						}
+						return false, nil, nil
+					},
+				},
+			},
+			expectBackupPod: true,
+			expectBackupPVC: true,
+		},
+		{
+			name:            "succeed with invalid selected node and volume topology",
+			targetPVCName:   "fake-target-pvc-with-node",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObjWithNode,
+				daemonSet,
+				storageClassWaitForFirstConsumer,
+				restorePVObjWithTopology,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						getAction := action.(clientTesting.GetAction)
+						if getAction.GetName() == "fake-restore" {
+							return true, restorePVCObjBound, nil
 						}
 						return false, nil, nil
 					},
@@ -1658,27 +1744,28 @@ func TestCreateRestorePod(t *testing.T) {
 				log:        velerotest.NewLogger(),
 			}
 
-			pod, err := exposer.createRestorePod(
-				t.Context(),
-				corev1api.ObjectReference{
-					Namespace: velerov1.DefaultNamespace,
-					Name:      "data-download",
-				},
-				targetPVCObj,
-				time.Second*3,
-				nil,
-				nil,
-				nil,
-				test.selectedNode,
-				corev1api.ResourceRequirements{},
-				test.nodeOS,
-				test.affinity,
-				"", // priority class name
-				nil,
-				"", // volumeSnapshotNamespace
-				"", // volumeID
-				nil,
-			)
+	pod, err := exposer.createRestorePod(
+		t.Context(),
+		corev1api.ObjectReference{
+			Namespace: velerov1.DefaultNamespace,
+			Name:      "data-download",
+		},
+		targetPVCObj,
+		time.Second*3,
+		nil,
+		nil,
+		nil,
+		test.selectedNode,
+		corev1api.ResourceRequirements{},
+		test.nodeOS,
+		test.affinity,
+		"", // priority class name
+		nil,
+		"", // volumeSnapshotNamespace
+		"", // volumeID
+		nil,
+		nil, // volumeTopology
+	)
 
 			require.NoError(t, err)
 			if test.expectedPod != nil {
