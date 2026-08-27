@@ -280,6 +280,24 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		}
 	}()
 
+	var volumeTopology *corev1api.NodeSelector
+	if !e.validateSelectedNode(ctx, selectedNode, param.DataMover, curLog) {
+		curLog.WithField("pvc name", restorePVC.Name).Infof("Getting volume topology and ignore selected node %s", selectedNode)
+
+		selectedNode = ""
+
+		restorePV, err := kube.WaitPVCBound(ctx, e.kubeClient.CoreV1(), e.kubeClient.CoreV1(), restorePVC.Name, restorePVC.Namespace, param.ExposeTimeout)
+		if err != nil {
+			return errors.Wrap(err, "error waiting for restore PVC bound")
+		}
+
+		if tp, err := kube.GetVolumeTopology(ctx, e.kubeClient.CoreV1(), e.kubeClient.StorageV1(), restorePV.Name, restorePV.Spec.StorageClassName); err != nil {
+			return errors.Wrapf(err, "error getting volume topology for PV %s, storage class %s", restorePV.Name, restorePV.Spec.StorageClassName)
+		} else {
+			volumeTopology = tp
+		}
+	}
+
 	curLog.Info("Creating restore pod")
 	var volumeID string
 	if param.CSI != nil && param.CSI.Snapshot != nil {
@@ -325,6 +343,7 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		param.TargetNamespace,
 		volumeID,
 		csiSnapshotMetadataServiceConfigs,
+		volumeTopology,
 	)
 	if err != nil {
 		return errors.Wrapf(err, "error to create restore pod")
@@ -725,6 +744,7 @@ func (e *genericRestoreExposer) createRestorePod(
 	volumeSnapshotNamespace string,
 	volumeID string,
 	csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
+	volumeTopology *corev1api.NodeSelector,
 ) (*corev1api.Pod, error) {
 	restorePodName := ownerObject.Name
 	restorePVCName := ownerObject.Name
@@ -863,7 +883,7 @@ func (e *genericRestoreExposer) createRestorePod(
 		})
 	}
 
-	podAffinity := kube.ToSystemAffinity(affinity, nil)
+	podAffinity := kube.ToSystemAffinity(affinity, volumeTopology)
 
 	pod := &corev1api.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1033,4 +1053,28 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 	}
 
 	return restorePVC, nil
+}
+
+func (e *genericRestoreExposer) validateSelectedNode(ctx context.Context, node string, dataMover string, log logrus.FieldLogger) bool {
+	if node == "" {
+		return true
+	}
+
+	os, err := kube.GetNodeOS(ctx, node, e.kubeClient.CoreV1())
+	if err != nil {
+		log.WithError(err).Warnf("Unable to get OS for selected node %s", node)
+		return false
+	}
+
+	if os != kube.NodeOSLinux && os != kube.NodeOSWindows {
+		log.Warnf("Unsupported OS for selected node %s", node)
+		return false
+	}
+
+	if dataMover == datamover.DataMoverTypeVeleroBlock && os != kube.NodeOSLinux {
+		log.Infof("Block data mover will not use selected node %s because its OS %s is not supported", node, os)
+		return false
+	}
+
+	return true
 }
