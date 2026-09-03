@@ -255,27 +255,11 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 	// Get volumeID before creating the restore pod because the existingPV may be deleted when creating the PVC if the volume policy is different
 	var volumeID string
 	if param.CSI != nil && param.CSI.Snapshot != nil {
-		vs := &snapshotv1api.VolumeSnapshot{}
-		if err := e.ctrlClient.Get(ctx, client.ObjectKey{
-			Namespace: param.CSI.Snapshot.VolumeSnapshotNamespace,
-			Name:      param.CSI.Snapshot.VolumeSnapshot,
-		}, vs); err != nil {
-			return errors.Wrapf(err, "error to get volume snapshot %s/%s", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot)
-		}
-
-		var vsc *snapshotv1api.VolumeSnapshotContent
-		vsc, err = csi.GetVSCForVS(ctx, vs, e.ctrlClient)
+		volumeID, err = e.getVolumeID(ctx, param.CSI.Snapshot, param.TargetPVName)
 		if err != nil {
-			return errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
+			// only log the error. Without the volume ID, exposer will fallback to full restore.
+			curLog.Errorf("failed to get volume ID from snapshot %s/%s, err: %v", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot, err)
 		}
-
-		var cbtInfo csi.CBTInfo
-		cbtInfo, err = csi.GetCBTInfo(ctx, e.kubeClient, e.log, vs, vsc, param.TargetPVName)
-		if err != nil {
-			return errors.Wrap(err, "error to get CBT info")
-		}
-		curLog.Debugf("CBT info: %+v", cbtInfo)
-		volumeID = cbtInfo.VolumeID
 	}
 
 	curLog.Info("Creating restore PVC")
@@ -1081,4 +1065,26 @@ func (e *genericRestoreExposer) validateSelectedNode(ctx context.Context, node s
 	}
 
 	return true
+}
+
+func (e *genericRestoreExposer) getVolumeID(ctx context.Context, snapshot *velerov2alpha1api.CSISnapshotSpec, targetPVName string) (string, error) {
+	vs := &snapshotv1api.VolumeSnapshot{}
+	if err := e.ctrlClient.Get(ctx, client.ObjectKey{
+		Namespace: snapshot.VolumeSnapshotNamespace,
+		Name:      snapshot.VolumeSnapshot,
+	}, vs); err != nil {
+		return "", errors.Wrapf(err, "error to get volume snapshot %s/%s", snapshot.VolumeSnapshotNamespace, snapshot.VolumeSnapshot)
+	}
+
+	vsc, err := csi.GetVSCForVS(ctx, vs, e.ctrlClient)
+	if err != nil {
+		return "", errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
+	}
+
+	var cbtInfo csi.CBTInfo
+	cbtInfo, err = csi.GetCBTInfo(ctx, e.kubeClient, e.log, vs, vsc, targetPVName)
+	if err != nil {
+		return "", errors.Wrap(err, "error to get CBT info")
+	}
+	return cbtInfo.VolumeID, nil
 }

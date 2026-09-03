@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
@@ -33,8 +34,10 @@ import (
 	clientTesting "k8s.io/client-go/testing"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
@@ -713,6 +716,336 @@ func TestRestoreExpose_SecretCopy(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "error copying secret")
+	})
+}
+
+func TestGetVolumeID(t *testing.T) {
+	vscName := "fake-vsc"
+	snapshotHandle := "fake-snapshot-handle"
+
+	tests := []struct {
+		name          string
+		snapshot      *velerov2alpha1api.CSISnapshotSpec
+		targetPVName  string
+		ctrlClientObj []runtime.Object
+		kubeClientObj []runtime.Object
+		expectedID    string
+		expectedErr   string
+	}{
+		{
+			name: "VS not found in ctrlClient",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "non-existent-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			expectedErr: "error to get volume snapshot fake-ns/non-existent-vs",
+		},
+		{
+			name: "GetVSCForVS error - VS has no bound VSC",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+					},
+					Status: nil,
+				},
+			},
+			expectedErr: "error to get volume snapshot content for volume snapshot fake-ns/fake-vs: invalid snapshot info in volume snapshot fake-vs",
+		},
+		{
+			name: "GetVSCForVS error - VSC not found in ctrlClient",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &vscName,
+					},
+				},
+			},
+			expectedErr: "error to get volume snapshot content for volume snapshot fake-ns/fake-vs: error getting volume snapshot content from API",
+		},
+		{
+			name: "GetCBTInfo error - target PV not found",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			targetPVName: "missing-pv",
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &vscName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vscName,
+					},
+					Status: &snapshotv1api.VolumeSnapshotContentStatus{
+						SnapshotHandle: &snapshotHandle,
+					},
+				},
+			},
+			expectedErr: "error to get CBT info: failed to get pv missing-pv",
+		},
+		{
+			name: "GetCBTInfo error - empty volumeID on PV",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			targetPVName: "fake-pv",
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &vscName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vscName,
+					},
+					Status: &snapshotv1api.VolumeSnapshotContentStatus{
+						SnapshotHandle: &snapshotHandle,
+					},
+				},
+			},
+			kubeClientObj: []runtime.Object{
+				&corev1api.PersistentVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-pv",
+					},
+				},
+			},
+			expectedErr: "error to get CBT info: volumeID must not be empty for CBT",
+		},
+		{
+			name: "success with VKS annotations",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+						Annotations: map[string]string{
+							util.VSphereCNSChangeIDAnno: "c-1",
+							util.VSphereCNSSnapshotAnno: "vol-vks+snap-1",
+						},
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &vscName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vscName,
+					},
+				},
+			},
+			expectedID: "vol-vks",
+		},
+		{
+			name: "success with PV CSI volume handle",
+			snapshot: &velerov2alpha1api.CSISnapshotSpec{
+				VolumeSnapshot:          "fake-vs",
+				VolumeSnapshotNamespace: "fake-ns",
+			},
+			targetPVName: "fake-pv",
+			ctrlClientObj: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "fake-ns",
+						Name:      "fake-vs",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &vscName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vscName,
+					},
+					Status: &snapshotv1api.VolumeSnapshotContentStatus{
+						SnapshotHandle: &snapshotHandle,
+					},
+				},
+			},
+			kubeClientObj: []runtime.Object{
+				&corev1api.PersistentVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-pv",
+					},
+					Spec: corev1api.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1api.PersistentVolumeSource{
+							CSI: &corev1api.CSIPersistentVolumeSource{
+								VolumeHandle: "csi-vol-789",
+							},
+						},
+					},
+				},
+			},
+			expectedID: "csi-vol-789",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
+			fakeCtrlClient := velerotest.NewFakeControllerRuntimeClient(t, test.ctrlClientObj...)
+
+			exposer := genericRestoreExposer{
+				kubeClient: fakeKubeClient,
+				ctrlClient: fakeCtrlClient,
+				log:        velerotest.NewLogger(),
+			}
+
+			volID, err := exposer.getVolumeID(t.Context(), test.snapshot, test.targetPVName)
+			if test.expectedErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), test.expectedErr)
+				assert.Empty(t, volID)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, test.expectedID, volID)
+			}
+		})
+	}
+}
+
+func TestRestoreExpose_CSISnapshot(t *testing.T) {
+	scName := "fake-sc"
+	restore := &velerov1.Restore{
+		TypeMeta:   metav1.TypeMeta{APIVersion: velerov1.SchemeGroupVersion.String(), Kind: "Restore"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: velerov1.DefaultNamespace, Name: "fake-restore", UID: "fake-uid"},
+	}
+	ownerObject := corev1api.ObjectReference{
+		Kind:       restore.Kind,
+		Namespace:  restore.Namespace,
+		Name:       restore.Name,
+		UID:        restore.UID,
+		APIVersion: restore.APIVersion,
+	}
+	targetPVCObj := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "fake-target-pvc"},
+		Spec:       corev1api.PersistentVolumeClaimSpec{StorageClassName: &scName},
+	}
+	storageClass := &storagev1api.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fake-sc"}}
+	daemonSet := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+		TypeMeta:   metav1.TypeMeta{Kind: "DaemonSet", APIVersion: appsv1api.SchemeGroupVersion.String()},
+		Spec: appsv1api.DaemonSetSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{Containers: []corev1api.Container{{Image: "fake-image"}}},
+			},
+		},
+	}
+
+	vscName := "fake-vsc"
+
+	t.Run("getVolumeID fails - falls back to full restore and creates pod without volume ID", func(t *testing.T) {
+		fakeKubeClient := fake.NewSimpleClientset(targetPVCObj, storageClass, daemonSet)
+		fakeCtrlClient := velerotest.NewFakeControllerRuntimeClient(t)
+		exposer := genericRestoreExposer{
+			kubeClient: fakeKubeClient,
+			ctrlClient: fakeCtrlClient,
+			log:        velerotest.NewLogger(),
+		}
+
+		err := exposer.Expose(t.Context(), ownerObject, GenericRestoreExposeParam{
+			TargetPVCName:    "fake-target-pvc",
+			TargetNamespace:  "fake-ns",
+			HostingPodLabels: map[string]string{},
+			Resources:        corev1api.ResourceRequirements{},
+			ExposeTimeout:    time.Millisecond,
+			CSI: &GenericRestoreExposeCSI{
+				Snapshot: &velerov2alpha1api.CSISnapshotSpec{
+					VolumeSnapshot:          "non-existent-vs",
+					VolumeSnapshotNamespace: "fake-ns",
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		pod, err := fakeKubeClient.CoreV1().Pods(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+		require.NoError(t, err)
+		require.Len(t, pod.Spec.Containers, 1)
+		for _, arg := range pod.Spec.Containers[0].Args {
+			assert.NotContains(t, arg, "--volume-id=")
+			assert.NotContains(t, arg, "--vs-namespace=")
+		}
+	})
+
+	t.Run("getVolumeID succeeds - passes volume ID to restore pod", func(t *testing.T) {
+		fakeKubeClient := fake.NewSimpleClientset(targetPVCObj, storageClass, daemonSet)
+		fakeCtrlClient := velerotest.NewFakeControllerRuntimeClient(t,
+			&snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "fake-ns",
+					Name:      "fake-vs",
+					Annotations: map[string]string{
+						util.VSphereCNSChangeIDAnno: "c-1",
+						util.VSphereCNSSnapshotAnno: "vol-123+snap-1",
+					},
+				},
+				Status: &snapshotv1api.VolumeSnapshotStatus{
+					BoundVolumeSnapshotContentName: &vscName,
+				},
+			},
+			&snapshotv1api.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: vscName,
+				},
+			},
+		)
+		exposer := genericRestoreExposer{
+			kubeClient: fakeKubeClient,
+			ctrlClient: fakeCtrlClient,
+			log:        velerotest.NewLogger(),
+		}
+
+		err := exposer.Expose(t.Context(), ownerObject, GenericRestoreExposeParam{
+			TargetPVCName:    "fake-target-pvc",
+			TargetNamespace:  "fake-ns",
+			HostingPodLabels: map[string]string{},
+			Resources:        corev1api.ResourceRequirements{},
+			ExposeTimeout:    time.Millisecond,
+			CSI: &GenericRestoreExposeCSI{
+				Snapshot: &velerov2alpha1api.CSISnapshotSpec{
+					VolumeSnapshot:          "fake-vs",
+					VolumeSnapshotNamespace: "fake-ns",
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		pod, err := fakeKubeClient.CoreV1().Pods(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+		require.NoError(t, err)
+		require.Len(t, pod.Spec.Containers, 1)
+		assert.Contains(t, pod.Spec.Containers[0].Args, "--volume-id=vol-123")
+		assert.Contains(t, pod.Spec.Containers[0].Args, "--vs-namespace=fake-ns")
 	})
 }
 
