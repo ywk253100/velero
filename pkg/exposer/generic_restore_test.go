@@ -106,6 +106,65 @@ func TestRestoreExpose(t *testing.T) {
 		},
 	}
 
+	targetPVCObjWithNode := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "fake-ns",
+			Name:      "fake-target-pvc-with-node",
+			Annotations: map[string]string{
+				"volume.kubernetes.io/selected-node": "fake-node",
+			},
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+		},
+	}
+
+	volumeBindingMode := storagev1api.VolumeBindingWaitForFirstConsumer
+	storageClassWaitForFirstConsumer := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-sc",
+		},
+		VolumeBindingMode: &volumeBindingMode,
+	}
+
+	restorePVCObjBound := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1.DefaultNamespace,
+			Name:      "fake-restore",
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			VolumeName:       "fake-restore-pv",
+			StorageClassName: &scName,
+		},
+		Status: corev1api.PersistentVolumeClaimStatus{
+			Phase: corev1api.ClaimBound,
+		},
+	}
+
+	restorePVObjWithTopology := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-restore-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			StorageClassName: "fake-sc",
+			NodeAffinity: &corev1api.VolumeNodeAffinity{
+				Required: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key:      "topology.kubernetes.io/zone",
+									Operator: corev1api.NodeSelectorOpIn,
+									Values:   []string{"zone-1"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
 	daemonSet := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "velero",
@@ -129,20 +188,22 @@ func TestRestoreExpose(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		kubeClientObj   []runtime.Object
-		ownerRestore    *velerov1.Restore
-		targetPVCName   string
-		targetNamespace string
-		targetPVName    string
-		kubeReactors    []reactor
-		cacheVolume     *CacheConfigs
-		dataMover       string
-		expectBackupPod bool
-		expectBackupPVC bool
-		expectCachePVC  bool
-		expectBackupPV  bool
-		err             string
+		name                 string
+		kubeClientObj        []runtime.Object
+		ownerRestore         *velerov1.Restore
+		targetPVCName        string
+		targetNamespace      string
+		targetPVName         string
+		kubeReactors         []reactor
+		cacheVolume          *CacheConfigs
+		dataMover            string
+		expectBackupPod      bool
+		expectBackupPVC      bool
+		expectCachePVC       bool
+		expectBackupPV       bool
+		expectedNodeSelector map[string]string
+		expectedNodeAffinity *corev1api.NodeAffinity
+		err                  string
 	}{
 		{
 			name:            "wait target pvc consumed fail",
@@ -255,6 +316,54 @@ func TestRestoreExpose(t *testing.T) {
 			},
 			expectBackupPod: true,
 			expectBackupPVC: true,
+		},
+		{
+			name:            "succeed with invalid selected node and volume topology",
+			targetPVCName:   "fake-target-pvc-with-node",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObjWithNode,
+				daemonSet,
+				storageClassWaitForFirstConsumer,
+				restorePVObjWithTopology,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						getAction := action.(clientTesting.GetAction)
+						if getAction.GetName() == "fake-restore" {
+							return true, restorePVCObjBound, nil
+						}
+						return false, nil, nil
+					},
+				},
+			},
+			expectBackupPod:      true,
+			expectBackupPVC:      true,
+			expectedNodeSelector: map[string]string{},
+			expectedNodeAffinity: &corev1api.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key:      "topology.kubernetes.io/zone",
+									Operator: corev1api.NodeSelectorOpIn,
+									Values:   []string{"zone-1"},
+								},
+								{
+									Key:      "kubernetes.io/os",
+									Operator: corev1api.NodeSelectorOpNotIn,
+									Values:   []string{"windows"},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 		{
 			name:            "create temporary PV fail",
@@ -473,9 +582,16 @@ func TestRestoreExpose(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			_, err = exposer.kubeClient.CoreV1().Pods(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+			pod, err := exposer.kubeClient.CoreV1().Pods(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
 			if test.expectBackupPod {
 				require.NoError(t, err)
+				if test.expectedNodeSelector != nil {
+					assert.Equal(t, test.expectedNodeSelector, pod.Spec.NodeSelector)
+				}
+				if test.expectedNodeAffinity != nil {
+					require.NotNil(t, pod.Spec.Affinity)
+					assert.Equal(t, test.expectedNodeAffinity, pod.Spec.Affinity.NodeAffinity)
+				}
 			} else {
 				require.True(t, apierrors.IsNotFound(err), "expected IsNotFound, got %v", err)
 			}
@@ -1522,6 +1638,115 @@ end diagnose restore exposer`,
 	}
 }
 
+func TestValidateSelectedNode(t *testing.T) {
+	tests := []struct {
+		name          string
+		node          string
+		dataMover     string
+		kubeClientObj []runtime.Object
+		expected      bool
+	}{
+		{
+			name:     "empty node",
+			node:     "",
+			expected: true,
+		},
+		{
+			name: "node os is linux",
+			node: "fake-node",
+			kubeClientObj: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-node",
+						Labels: map[string]string{
+							corev1api.LabelOSStable: kube.NodeOSLinux,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "node os is windows",
+			node: "fake-node",
+			kubeClientObj: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-node",
+						Labels: map[string]string{
+							corev1api.LabelOSStable: kube.NodeOSWindows,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "node without os label",
+			node: "fake-node",
+			kubeClientObj: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-node",
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name:     "node not found",
+			node:     "fake-node",
+			expected: false,
+		},
+		{
+			name:      "block data mover with linux node",
+			node:      "fake-node",
+			dataMover: datamover.DataMoverTypeVeleroBlock,
+			kubeClientObj: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-node",
+						Labels: map[string]string{
+							corev1api.LabelOSStable: kube.NodeOSLinux,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name:      "block data mover with windows node",
+			node:      "fake-node",
+			dataMover: datamover.DataMoverTypeVeleroBlock,
+			kubeClientObj: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "fake-node",
+						Labels: map[string]string{
+							corev1api.LabelOSStable: kube.NodeOSWindows,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
+
+			exposer := genericRestoreExposer{
+				kubeClient: fakeKubeClient,
+				log:        velerotest.NewLogger(),
+			}
+
+			actual := exposer.validateSelectedNode(t.Context(), test.node, test.dataMover, exposer.log)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
 func TestCreateRestorePod(t *testing.T) {
 	scName := "storage-class-01"
 
@@ -1678,6 +1903,7 @@ func TestCreateRestorePod(t *testing.T) {
 				"", // volumeSnapshotNamespace
 				"", // volumeID
 				nil,
+				nil, // volumeTopology
 			)
 
 			require.NoError(t, err)
