@@ -551,6 +551,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathCompleted(ctx context.Context, nam
 		pvb.Status.SnapshotID = result.Backup.SnapshotID
 		pvb.Status.CompletionTimestamp = &completionTime
 		pvb.Status.IncrementalBytes = result.Backup.IncrementalBytes
+		pvb.Status.SourceSize = result.Backup.SourceSize
 		if result.Backup.EmptySnapshot {
 			pvb.Status.Message = "volume was empty so no snapshot was taken"
 		}

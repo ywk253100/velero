@@ -132,6 +132,10 @@ type PodVolumeBackupStatus struct {
 	// +optional
 	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
 
+	// SourceSize holds the total size of the source volume.
+	// +optional
+	SourceSize int64 `json:"sourceSize,omitempty"`
+
 	// AcceptedTimestamp records the time the pod volume backup is to be prepared.
 	// The server's time is used for AcceptedTimestamp
 	// +optional
