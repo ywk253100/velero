@@ -685,6 +685,8 @@ func TestGenerateVolumeInfoFromPVB(t *testing.T) {
 				StartTimestamp(&now).
 				CompletionTimestamp(&now).
 				Phase(velerov1api.PodVolumeBackupPhaseCompleted).
+				TotalBytes(1024).
+				IncrementalBytes(512).
 				Result(),
 			pod: builder.ForPod("velero", "testPod").Containers(&corev1api.Container{
 				Name: "test",
@@ -715,9 +717,11 @@ func TestGenerateVolumeInfoFromPVB(t *testing.T) {
 					CompletionTimestamp: &now,
 					Result:              VolumeResultSucceeded,
 					PVBInfo: &PodVolumeBackupInfo{
-						PodName:      "testPod",
-						PodNamespace: "velero",
-						Phase:        velerov1api.PodVolumeBackupPhaseCompleted,
+						PodName:         "testPod",
+						PodNamespace:    "velero",
+						Phase:           velerov1api.PodVolumeBackupPhaseCompleted,
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
 					},
 					PVInfo: &PVInfo{
 						ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
@@ -1076,7 +1080,12 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 						PodName("testPod").
 						Volume("data-volume-1").
 						UploaderType("kopia").
-						SnapshotID("pvr-snap-001").Result(),
+						SnapshotID("pvr-snap-001").
+						Phase(velerov1api.PodVolumeRestorePhaseCompleted).
+						RestoreType("Incremental").
+						TotalBytes(1024).
+						IncrementalBytes(512).
+						Result(),
 				},
 			},
 			expectResultValues: []RestoreVolumeInfo{
@@ -1087,11 +1096,15 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 					RestoreMethod:     PodVolumeRestore,
 					SnapshotDataMoved: false,
 					PVRInfo: &PodVolumeRestoreInfo{
-						SnapshotHandle: "pvr-snap-001",
-						PodName:        "testPod",
-						PodNamespace:   "testNS",
-						UploaderType:   "kopia",
-						VolumeName:     "data-volume-1",
+						SnapshotHandle:  "pvr-snap-001",
+						PodName:         "testPod",
+						PodNamespace:    "testNS",
+						UploaderType:    "kopia",
+						VolumeName:      "data-volume-1",
+						Phase:           velerov1api.PodVolumeRestorePhaseCompleted,
+						RestoreType:     "Incremental",
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
 					},
 				},
 				{
@@ -1213,6 +1226,7 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 							}).
 							Phase(velerov2alpha1.DataDownloadPhaseCompleted).
 							Progress(veleroshared.DataMoveOperationProgress{TotalBytes: 2048}).
+							IncrementalBytes(512).
 							RestoreType("Incremental").
 							Result(),
 						*builder.ForDataDownload("velero", "testDataDownload-2").
@@ -1238,13 +1252,14 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 					RestoreMethod:     CSISnapshot,
 					SnapshotDataMoved: true,
 					SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
-						DataMover:      "velero",
-						UploaderType:   velerov1api.BackupRepositoryTypeKopia,
-						SnapshotHandle: "dd-snap-001",
-						OperationID:    "dd-operation-001",
-						Phase:          velerov2alpha1.DataDownloadPhaseCompleted,
-						Size:           2048,
-						RestoreType:    "Incremental",
+						DataMover:       "velero",
+						UploaderType:    velerov1api.BackupRepositoryTypeKopia,
+						SnapshotHandle:  "dd-snap-001",
+						OperationID:     "dd-operation-001",
+						Phase:           velerov2alpha1.DataDownloadPhaseCompleted,
+						Size:            2048,
+						IncrementalSize: ptr.To(int64(512)),
+						RestoreType:     "Incremental",
 					},
 				},
 				{
@@ -1466,6 +1481,7 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, jsonStr, `"podName":"pod-2"`)
 	assert.Contains(t, jsonStr, `"podNamespace":"ns-2"`)
 	assert.Contains(t, jsonStr, `"nodeName":"node-2"`)
+	assert.Contains(t, jsonStr, `"incrementalSize":60`)
 	assert.Contains(t, jsonStr, `"csiSnapshotInfo":{`)
 	assert.Contains(t, jsonStr, `"nativeSnapshotInfo":{`)
 
@@ -1473,4 +1489,122 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 	err = json.Unmarshal(data, &unmarshaled)
 	require.NoError(t, err)
 	assert.Equal(t, orig, unmarshaled)
+}
+
+func TestNewPodVolumeInfoFromPVR(t *testing.T) {
+	tests := []struct {
+		name     string
+		pvr      *velerov1api.PodVolumeRestore
+		expected *PodVolumeRestoreInfo
+	}{
+		{
+			name: "all fields populated including incremental bytes and restore type",
+			pvr: builder.ForPodVolumeRestore("velero", "pvr-1").
+				SnapshotID("snap-1").
+				Volume("vol-1").
+				PodName("pod-1").
+				PodNamespace("ns-1").
+				UploaderType("kopia").
+				Phase(velerov1api.PodVolumeRestorePhaseCompleted).
+				RestoreType("Incremental").
+				TotalBytes(2048).
+				IncrementalBytes(512).
+				Result(),
+			expected: &PodVolumeRestoreInfo{
+				SnapshotHandle:  "snap-1",
+				Size:            2048,
+				IncrementalSize: ptr.To(int64(512)),
+				UploaderType:    "kopia",
+				VolumeName:      "vol-1",
+				PodName:         "pod-1",
+				PodNamespace:    "ns-1",
+				Phase:           velerov1api.PodVolumeRestorePhaseCompleted,
+				RestoreType:     "Incremental",
+			},
+		},
+		{
+			name: "optional fields empty or nil",
+			pvr: builder.ForPodVolumeRestore("velero", "pvr-2").
+				SnapshotID("snap-2").
+				Volume("vol-2").
+				PodName("pod-2").
+				PodNamespace("ns-2").
+				UploaderType("restic").
+				Result(),
+			expected: &PodVolumeRestoreInfo{
+				SnapshotHandle: "snap-2",
+				Size:           0,
+				UploaderType:   "restic",
+				VolumeName:     "vol-2",
+				PodName:        "pod-2",
+				PodNamespace:   "ns-2",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := newPodVolumeInfoFromPVR(tc.pvr)
+			assert.Equal(t, tc.expected, actual)
+		})
+	}
+}
+
+func TestNewPodVolumeInfoFromPVB(t *testing.T) {
+	tests := []struct {
+		name     string
+		pvb      *velerov1api.PodVolumeBackup
+		expected *PodVolumeBackupInfo
+	}{
+		{
+			name: "all fields populated including incremental bytes",
+			pvb: builder.ForPodVolumeBackup("velero", "pvb-1").
+				SnapshotID("snap-1").
+				Volume("vol-1").
+				PodName("pod-1").
+				PodNamespace("ns-1").
+				Node("node-1").
+				UploaderType("kopia").
+				Phase(velerov1api.PodVolumeBackupPhaseCompleted).
+				TotalBytes(2048).
+				IncrementalBytes(512).
+				Result(),
+			expected: &PodVolumeBackupInfo{
+				SnapshotHandle:  "snap-1",
+				Size:            2048,
+				IncrementalSize: ptr.To(int64(512)),
+				UploaderType:    "kopia",
+				VolumeName:      "vol-1",
+				PodName:         "pod-1",
+				PodNamespace:    "ns-1",
+				NodeName:        "node-1",
+				Phase:           velerov1api.PodVolumeBackupPhaseCompleted,
+			},
+		},
+		{
+			name: "optional fields empty or nil",
+			pvb: builder.ForPodVolumeBackup("velero", "pvb-2").
+				SnapshotID("snap-2").
+				Volume("vol-2").
+				PodName("pod-2").
+				PodNamespace("ns-2").
+				UploaderType("restic").
+				Result(),
+			expected: &PodVolumeBackupInfo{
+				SnapshotHandle: "snap-2",
+				Size:           0,
+				UploaderType:   "restic",
+				VolumeName:     "vol-2",
+				PodName:        "pod-2",
+				PodNamespace:   "ns-2",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := newPodVolumeInfoFromPVB(tc.pvb)
+			assert.Equal(t, tc.expected, actual)
+		})
+	}
 }
