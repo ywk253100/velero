@@ -94,6 +94,10 @@ func (c *bitmapImpl) VolumeID() string {
 }
 
 func (c *bitmapImpl) SetError(err error) {
+	if err == nil {
+		return
+	}
+
 	c.cbtErrors = append(c.cbtErrors, err)
 }
 

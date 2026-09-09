@@ -169,51 +169,48 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 	}
 
 	var previous *udmrepo.Snapshot
+	if parentSnapshot != "" {
+		log.Infof("Loading provided parent snapshot %s", parentSnapshot)
 
-	if !forceFull {
-		if parentSnapshot != "" {
-			snap, err := rep.GetSnapshot(ctx, udmrepo.ID(parentSnapshot))
-			if err != nil {
-				log.WithError(err).Warn("Failed to load previous snapshot, fallback to full backup")
-			} else {
-				previous = &snap
-				log.Infof("Using provided parent snapshot %s", parentSnapshot)
-			}
-		} else {
-			log.Infof("Searching for parent snapshot")
-
-			snap, err := findPreviousSnapshot(ctx, rep, realSource, snapshotTags, nil, log)
-			if err != nil {
-				log.WithError(err).Warn("Failed to search previous snapshot, fallback to full backup")
-			} else {
-				previous = &snap
-				log.Infof("Using previous snapshot %s", snap.ID)
-			}
+		snap, err := rep.GetSnapshot(ctx, udmrepo.ID(parentSnapshot))
+		if err != nil {
+			return parentBackupInfo{}, errors.Wrapf(err, "error loading previous snapshot")
 		}
+
+		previous = &snap
 	} else {
-		log.Info("Forcing full snapshot")
-	}
+		log.Infof("Searching for parent snapshot")
 
-	parentInfo := parentBackupInfo{}
-	if previous != nil {
-		if previous.Tags == nil {
-			log.Warnf("No tag from parent snapshot %s, fallback to full backup", previous.ID)
-		} else if previous.Tags[uploader.CBTChangeIDTag] == "" {
-			log.Warnf("No ChangeID tag from parent snapshot %s, fallback to full backup", previous.ID)
-		} else if previous.Tags[uploader.CBTVolumeIDTag] == "" {
-			log.Warnf("No VolumeID tag from parent snapshot %s, fallback to full backup", previous.ID)
-		} else if previous.Tags[uploader.CBTVolumeIDTag] != volumeID {
-			log.Warnf("VolumeID %s from parent snapshot %s is not expected as %s, fallback to full backup", previous.Tags[uploader.CBTVolumeIDTag], previous.ID, volumeID)
-		} else if obj, err := loadObjectFromSnapshot(ctx, rep, previous); err != nil {
-			log.WithError(err).Warnf("Failed to load object from parent snapshot %s, fallback to full backup", previous.ID)
-		} else {
-			parentInfo.parentObject = obj
-			parentInfo.changeID = previous.Tags[uploader.CBTChangeIDTag]
-			parentInfo.volumeID = previous.Tags[uploader.CBTVolumeIDTag]
-
-			log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", previous.ID, previous.StartTime, previous.EndTime, previous.Description)
+		snap, err := findPreviousSnapshot(ctx, rep, realSource, snapshotTags, nil, log)
+		if err != nil {
+			return parentBackupInfo{}, errors.Wrapf(err, "error searching previous snapshot")
 		}
+
+		previous = &snap
 	}
+
+	if previous.Tags == nil {
+		return parentBackupInfo{}, errors.Errorf("no tag from parent snapshot %s", previous.ID)
+	}
+
+	if previous.Tags[uploader.CBTChangeIDTag] == "" {
+		return parentBackupInfo{}, errors.Errorf("no ChangeID tag from parent snapshot %s", previous.ID)
+	}
+
+	if previous.Tags[uploader.CBTVolumeIDTag] == "" {
+		return parentBackupInfo{}, errors.Errorf("no VolumeID tag from parent snapshot %s", previous.ID)
+	}
+
+	if previous.Tags[uploader.CBTVolumeIDTag] != volumeID {
+		return parentBackupInfo{}, errors.Errorf("VolumeID %s from parent snapshot %s is not expected as %s", previous.Tags[uploader.CBTVolumeIDTag], previous.ID, volumeID)
+	}
+
+	obj, err := loadObjectFromSnapshot(ctx, rep, previous)
+	if err != nil {
+		return parentBackupInfo{}, errors.Wrapf(err, "error loading object from parent snapshot %s", previous.ID)
+	}
+
+	log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", previous.ID, previous.StartTime, previous.EndTime, previous.Description)
 
 	return parentBackupInfo{
 		parentObject: obj,

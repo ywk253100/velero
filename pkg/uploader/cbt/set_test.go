@@ -170,7 +170,8 @@ func TestSetBitmapOrFull(t *testing.T) {
 				svc = svcMock
 			}
 
-			bmp := NewBitmap(mb, 3*mb, tt.snapshotID, tt.changeID, "vol-1")
+			bmp := NewBitmap(mb, 3*mb, tt.snapshotID, "vol-1")
+			bmp.SetChangeID(tt.changeID)
 
 			err := SetBitmapOrFull(context.Background(), svc, bmp, tt.incOnly)
 
