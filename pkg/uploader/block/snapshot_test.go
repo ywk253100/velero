@@ -379,11 +379,12 @@ func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 			SubObjects: []udmrepo.ObjectMetadata{{ID: udmrepo.ID("parent-obj")}},
 		}, nil)
 
-	info := getParentBackupInfo(
+	info, err := getParentBackupInfo(
 		context.Background(), repo,
 		false, "", // no explicit parent -> discovery branch
 		volumeID, realSource, snapshotTags, logger,
 	)
+	require.NoError(t, err)
 
 	require.Equal(t, udmrepo.ID("parent-obj"), info.parentObject)
 
@@ -408,6 +409,7 @@ func TestGetParentBackupInfo(t *testing.T) {
 	}
 
 	validSnap := udmrepo.Snapshot{
+		ID:         "snap-valid",
 		RootObject: udmrepo.ObjectMetadata{ID: "root-obj"},
 		Tags: map[string]string{
 			uploader.CBTChangeIDTag:       "cid-abc",
@@ -421,7 +423,10 @@ func TestGetParentBackupInfo(t *testing.T) {
 		name           string
 		forceFull      bool
 		parentSnapshot string
+		emptyVolID     bool
 		setupMocks     func(repo *udmrepomocks.BackupRepo)
+		expectErr      bool
+		expectedErrStr string
 		expectEmpty    bool
 		expectedParent udmrepo.ID
 		expectedCID    string
@@ -433,52 +438,82 @@ func TestGetParentBackupInfo(t *testing.T) {
 			expectEmpty: true,
 		},
 		{
+			name:           "volumeID not provided",
+			emptyVolID:     true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "volumeID is not provided from the volume snapshot",
+		},
+		{
 			name:           "GetSnapshot fails — falls back to full",
 			parentSnapshot: "snap-parent",
 			setupMocks: func(repo *udmrepomocks.BackupRepo) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-parent")).
 					Return(udmrepo.Snapshot{}, errors.New("not found"))
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "error loading previous snapshot",
 		},
 		{
 			name:           "parent snapshot has nil tags — falls back to full",
 			parentSnapshot: "snap-notags",
 			setupMocks: func(repo *udmrepomocks.BackupRepo) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-notags")).
-					Return(udmrepo.Snapshot{Tags: nil}, nil)
+					Return(udmrepo.Snapshot{ID: "snap-notags", Tags: nil}, nil)
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "no tag from parent snapshot snap-notags",
 		},
 		{
 			name:           "parent snapshot missing ChangeID tag — falls back to full",
 			parentSnapshot: "snap-nocid",
 			setupMocks: func(repo *udmrepomocks.BackupRepo) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-nocid")).
-					Return(udmrepo.Snapshot{Tags: map[string]string{uploader.CBTVolumeIDTag: volumeID}}, nil)
+					Return(udmrepo.Snapshot{ID: "snap-nocid", Tags: map[string]string{uploader.CBTVolumeIDTag: volumeID}}, nil)
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "no ChangeID tag from parent snapshot snap-nocid",
 		},
 		{
 			name:           "parent snapshot missing VolumeID tag — falls back to full",
 			parentSnapshot: "snap-novid",
 			setupMocks: func(repo *udmrepomocks.BackupRepo) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-novid")).
-					Return(udmrepo.Snapshot{Tags: map[string]string{uploader.CBTChangeIDTag: "cid"}}, nil)
+					Return(udmrepo.Snapshot{ID: "snap-novid", Tags: map[string]string{uploader.CBTChangeIDTag: "cid"}}, nil)
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "no VolumeID tag from parent snapshot snap-novid",
 		},
 		{
 			name:           "parent snapshot VolumeID mismatch — falls back to full",
 			parentSnapshot: "snap-vidmismatch",
 			setupMocks: func(repo *udmrepomocks.BackupRepo) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-vidmismatch")).
-					Return(udmrepo.Snapshot{Tags: map[string]string{
+					Return(udmrepo.Snapshot{ID: "snap-vidmismatch", Tags: map[string]string{
 						uploader.CBTChangeIDTag: "cid",
 						uploader.CBTVolumeIDTag: "different-vol",
 					}}, nil)
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "VolumeID different-vol from parent snapshot snap-vidmismatch is not expected as vol-123",
+		},
+		{
+			name:           "loadObjectFromSnapshot fails — falls back to full",
+			parentSnapshot: "snap-valid",
+			setupMocks: func(repo *udmrepomocks.BackupRepo) {
+				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-valid")).
+					Return(validSnap, nil)
+				repo.On("ReadMetadata", mock.Anything, udmrepo.ID("root-obj")).
+					Return(nil, errors.New("read error"))
+			},
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "error loading object from parent snapshot snap-valid",
 		},
 		{
 			name:           "valid parent snapshot — returns parent info",
@@ -499,7 +534,9 @@ func TestGetParentBackupInfo(t *testing.T) {
 				repo.On("ListSnapshot", mock.Anything, realSource).
 					Return(nil, errors.New("list error"))
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "error searching previous snapshot",
 		},
 		{
 			name: "no parentSnapshot — no matching snapshot — falls back to full",
@@ -507,7 +544,9 @@ func TestGetParentBackupInfo(t *testing.T) {
 				repo.On("ListSnapshot", mock.Anything, realSource).
 					Return([]udmrepo.Snapshot{{Tags: map[string]string{"other": "tag"}}}, nil)
 			},
-			expectEmpty: true,
+			expectEmpty:    true,
+			expectErr:      true,
+			expectedErrStr: "error searching previous snapshot",
 		},
 		{
 			name: "no parentSnapshot — matching snapshot found — returns parent info",
@@ -532,7 +571,21 @@ func TestGetParentBackupInfo(t *testing.T) {
 				tc.setupMocks(mockRepo)
 			}
 
-			info := getParentBackupInfo(ctx, mockRepo, tc.forceFull, tc.parentSnapshot, volumeID, realSource, snapshotTags, testLog())
+			volID := volumeID
+			if tc.emptyVolID {
+				volID = ""
+			}
+
+			info, err := getParentBackupInfo(ctx, mockRepo, tc.forceFull, tc.parentSnapshot, volID, realSource, snapshotTags, testLog())
+
+			if tc.expectErr {
+				require.Error(t, err)
+				if tc.expectedErrStr != "" {
+					assert.Contains(t, err.Error(), tc.expectedErrStr)
+				}
+			} else {
+				require.NoError(t, err)
+			}
 
 			if tc.expectEmpty {
 				assert.Empty(t, info.parentObject)
@@ -542,6 +595,101 @@ func TestGetParentBackupInfo(t *testing.T) {
 				assert.Equal(t, tc.expectedParent, info.parentObject)
 				assert.Equal(t, tc.expectedCID, info.changeID)
 				assert.Equal(t, tc.expectedVID, info.volumeID)
+			}
+		})
+	}
+}
+
+func TestGetBackupInfo(t *testing.T) {
+	const volumeID = "vol-123"
+
+	validSnap := udmrepo.Snapshot{
+		ID: "snap-valid",
+		Tags: map[string]string{
+			uploader.CBTChangeIDTag: "cid-abc",
+			uploader.CBTVolumeIDTag: volumeID,
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		snapshot       udmrepo.Snapshot
+		volumeID       string
+		expectErr      bool
+		expectedErrStr string
+		expectedCID    string
+	}{
+		{
+			name:           "nil tags",
+			snapshot:       udmrepo.Snapshot{ID: "snap-nil-tags"},
+			volumeID:       volumeID,
+			expectErr:      true,
+			expectedErrStr: "no tag from snapshot snap-nil-tags",
+		},
+		{
+			name: "missing ChangeID tag",
+			snapshot: udmrepo.Snapshot{
+				ID:   "snap-no-cid",
+				Tags: map[string]string{uploader.CBTVolumeIDTag: volumeID},
+			},
+			volumeID:       volumeID,
+			expectErr:      true,
+			expectedErrStr: "no ChangeID tag from snapshot snap-no-cid",
+		},
+		{
+			name: "missing VolumeID tag",
+			snapshot: udmrepo.Snapshot{
+				ID:   "snap-no-vid",
+				Tags: map[string]string{uploader.CBTChangeIDTag: "cid-abc"},
+			},
+			volumeID:       volumeID,
+			expectErr:      true,
+			expectedErrStr: "no VolumeID tag from snapshot snap-no-vid",
+		},
+		{
+			name: "empty volumeID parameter",
+			snapshot: udmrepo.Snapshot{
+				ID: "snap-valid",
+				Tags: map[string]string{
+					uploader.CBTChangeIDTag: "cid-abc",
+					uploader.CBTVolumeIDTag: volumeID,
+				},
+			},
+			volumeID:       "",
+			expectErr:      true,
+			expectedErrStr: "no VolumeID tag from the volume snapshot",
+		},
+		{
+			name: "volumeID mismatch",
+			snapshot: udmrepo.Snapshot{
+				ID: "snap-vid-mismatch",
+				Tags: map[string]string{
+					uploader.CBTChangeIDTag: "cid-abc",
+					uploader.CBTVolumeIDTag: "other-vol",
+				},
+			},
+			volumeID:       volumeID,
+			expectErr:      true,
+			expectedErrStr: "volumeID other-vol from snapshot snap-vid-mismatch is not expected as vol-123",
+		},
+		{
+			name:        "valid snapshot",
+			snapshot:    validSnap,
+			volumeID:    volumeID,
+			expectErr:   false,
+			expectedCID: "cid-abc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			info, err := getBackupInfo(tc.snapshot, tc.volumeID)
+			if tc.expectErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrStr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedCID, info.changeID)
 			}
 		})
 	}

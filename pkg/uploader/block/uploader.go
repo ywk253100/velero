@@ -86,6 +86,12 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 		return udmrepo.Snapshot{}, 0, errors.New("bitmap is not available")
 	}
 
+	if bitmap.Errors() != nil {
+		for _, err := range bitmap.Errors() {
+			blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: -1, TotalBytes: -1, Message: err.Error()})
+		}
+	}
+
 	backupMode := udmrepo.ObjectDataBackupModeInc
 	if parentObject == "" {
 		backupMode = udmrepo.ObjectDataBackupModeFull
@@ -151,6 +157,12 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, int64, error) {
 	if bitmap == nil {
 		return 0, 0, errors.New("bitmap is not available")
+	}
+
+	if bitmap.Errors() != nil {
+		for _, err := range bitmap.Errors() {
+			blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: -1, TotalBytes: -1, Message: err.Error()})
+		}
 	}
 
 	meta, err := blkup.repoWriter.ReadMetadata(blkup.ctx, snapshot.RootObject.ID)
