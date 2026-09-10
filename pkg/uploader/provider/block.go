@@ -103,13 +103,13 @@ func (bp *blockProvider) RunBackup(
 	cbtParam CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
-	updater uploader.ProgressUpdater) (string, bool, int64, int64, error) {
+	updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, error) {
 	if updater == nil {
-		return "", false, 0, 0, errors.New("backup progress updater is invalid")
+		return "", false, 0, 0, 0, errors.New("backup progress updater is invalid")
 	}
 
 	if path == "" {
-		return "", false, 0, 0, errors.New("path is empty")
+		return "", false, 0, 0, 0, errors.New("path is empty")
 	}
 
 	log := bp.log.WithFields(logrus.Fields{
@@ -140,23 +140,23 @@ func (bp *blockProvider) RunBackup(
 	// equality check never matches and cancellation gets reported as a failure.
 	if errors.Is(err, block.ErrCanceled) {
 		log.Warn("Block backup is canceled")
-		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, ErrorCanceled
+		return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, ErrorCanceled
 	}
 
 	if err != nil {
-		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, errors.Wrapf(err, "Failed to run block backup")
+		return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, errors.Wrapf(err, "Failed to run block backup")
 	}
 
 	updater.UpdateProgress(
 		&uploader.Progress{
-			TotalBytes: snapshotInfo.Size,
-			BytesDone:  snapshotInfo.Size,
+			TotalBytes: snapshotInfo.SnapshotSize,
+			BytesDone:  snapshotInfo.SnapshotSize,
 		},
 	)
 
-	log.Infof("Block backup finished, snapshot ID %s, backup size %v, incremental size %v", snapshotInfo.ID, snapshotInfo.Size, snapshotInfo.IncrementalSize)
+	log.Infof("Block backup finished, snapshot ID %s, backup size %v, incremental size %v, source size %v", snapshotInfo.ID, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize)
 
-	return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, nil
+	return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, nil
 }
 
 func (bp *blockProvider) RunRestore(

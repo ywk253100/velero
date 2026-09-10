@@ -177,6 +177,10 @@ type DataUploadStatus struct {
 	// +optional
 	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
 
+	// SourceSize holds the total size of the source volume.
+	// +optional
+	SourceSize int64 `json:"sourceSize,omitempty"`
+
 	// Node is name of the node where the DataUpload is processed.
 	// +optional
 	Node string `json:"node,omitempty"`

@@ -52,8 +52,9 @@ func ValidateUploaderType(t string) (string, error) {
 
 type SnapshotInfo struct {
 	ID              string
-	Size            int64
+	SnapshotSize    int64
 	IncrementalSize int64
+	SourceSize      int64
 }
 
 // Progress which defined two variables to record progress

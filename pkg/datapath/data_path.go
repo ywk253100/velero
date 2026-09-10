@@ -197,7 +197,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 			dp.wgDataPath.Done()
 		}()
 
-		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := dp.uploaderProv.RunBackup(
+		snapshotID, emptySnapshot, totalBytes, incrementalBytes, sourceSize, err := dp.uploaderProv.RunBackup(
 			dp.ctx,
 			source.ByPath,
 			backupParam.RealSource,
@@ -226,7 +226,14 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 			}
 			dp.callbacks.OnFailed(context.Background(), dp.namespace, dp.jobName, dataPathErr)
 		} else {
-			dp.callbacks.OnCompleted(context.Background(), dp.namespace, dp.jobName, Result{Backup: BackupResult{snapshotID, emptySnapshot, source, totalBytes, ptr.To(incrementalBytes)}})
+			dp.callbacks.OnCompleted(context.Background(), dp.namespace, dp.jobName, Result{Backup: BackupResult{
+				SnapshotID:       snapshotID,
+				EmptySnapshot:    emptySnapshot,
+				Source:           source,
+				TotalBytes:       totalBytes,
+				IncrementalBytes: ptr.To(incrementalBytes),
+				SourceSize:       sourceSize,
+			}})
 		}
 	}()
 

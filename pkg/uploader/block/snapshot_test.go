@@ -106,14 +106,17 @@ func TestBackup(t *testing.T) {
 			expectedErrStr: "Failed to run uploader backup",
 		},
 		{
-			name: "success returns correct SnapshotInfo",
+			name: "success returns correct SnapshotInfo with snapshotSize larger than sourceSize",
 			setupOpenDev: func(t *testing.T) *os.File {
 				t.Helper()
 				return tempFile(t, "test-block-data")
 			},
 			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(8), nil)
+					Return(udmrepo.Snapshot{
+						RootObject: udmrepo.ObjectMetadata{ID: "root"},
+						TotalSize:  int64(2048),
+					}, int64(8), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-001"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
@@ -121,24 +124,31 @@ func TestBackup(t *testing.T) {
 				t.Helper()
 				assert.Equal(t, "snap-001", info.ID)
 				assert.Equal(t, int64(8), info.IncrementalSize)
-				assert.Positive(t, info.Size)
+				assert.Equal(t, int64(2048), info.SnapshotSize)
+				assert.Equal(t, int64(len("test-block-data")), info.SourceSize)
 			},
 		},
 		{
-			name: "success with CBT",
+			name: "success with CBT and snapshotSize equal to sourceSize",
 			setupOpenDev: func(t *testing.T) *os.File {
 				t.Helper()
 				return tempFile(t, "test-block-data")
 			},
 			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(8), nil)
+					Return(udmrepo.Snapshot{
+						RootObject: udmrepo.ObjectMetadata{ID: "root"},
+						TotalSize:  int64(len("test-block-data")),
+					}, int64(8), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-001"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
 			checkInfo: func(t *testing.T, info uploader.SnapshotInfo) {
 				t.Helper()
 				assert.Equal(t, "snap-001", info.ID)
+				assert.Equal(t, int64(8), info.IncrementalSize)
+				assert.Equal(t, int64(len("test-block-data")), info.SnapshotSize)
+				assert.Equal(t, int64(len("test-block-data")), info.SourceSize)
 			},
 		},
 	}
@@ -199,12 +209,13 @@ func TestSnapshotSource(t *testing.T) {
 	baseSource := sourceInfo{realSource: "/test/vol", size: 1024}
 
 	testCases := []struct {
-		name           string
-		setupMocks     func(blkup *mockUploader, repo *udmrepomocks.BackupRepo)
-		expectedErrStr string
-		expectedSnapID string
-		expectedSize   int64
-		cbtService     func(t *testing.T) cbtservice.Service
+		name                 string
+		setupMocks           func(blkup *mockUploader, repo *udmrepomocks.BackupRepo)
+		expectedErrStr       string
+		expectedSnapID       string
+		expectedSize         int64
+		expectedSnapshotSize int64
+		cbtService           func(t *testing.T) cbtservice.Service
 	}{
 		{
 			name: "uploader Backup error",
@@ -241,18 +252,19 @@ func TestSnapshotSource(t *testing.T) {
 					// In full mode, the iterator should cover the whole range if it's a full backup
 					return iter != nil
 				}), mock.Anything).
-					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(512), nil)
+					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}, TotalSize: 2048}, int64(512), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-success"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
-			expectedSnapID: "snap-success",
-			expectedSize:   512,
+			expectedSnapID:       "snap-success",
+			expectedSize:         512,
+			expectedSnapshotSize: 2048,
 		},
 		{
 			name: "tags from cbtSource and snapshotTags are merged onto snapshot",
 			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(udmrepo.Snapshot{}, int64(0), nil)
+					Return(udmrepo.Snapshot{TotalSize: 4096}, int64(256), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.MatchedBy(func(snap udmrepo.Snapshot) bool {
 					return snap.Tags[uploader.CBTChangeIDTag] == "cid-1" &&
 						snap.Tags[uploader.CBTVolumeIDTag] == "vid-1" &&
@@ -261,7 +273,9 @@ func TestSnapshotSource(t *testing.T) {
 				})).Return(udmrepo.ID("snap-tags"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
-			expectedSnapID: "snap-tags",
+			expectedSnapID:       "snap-tags",
+			expectedSize:         256,
+			expectedSnapshotSize: 4096,
 		},
 		{
 			name: "success with cbtService getting allocated blocks",
@@ -277,12 +291,13 @@ func TestSnapshotSource(t *testing.T) {
 			},
 			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(1024), nil)
+					Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}, TotalSize: 8192}, int64(1024), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-cbt-alloc"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
-			expectedSnapID: "snap-cbt-alloc",
-			expectedSize:   1024,
+			expectedSnapID:       "snap-cbt-alloc",
+			expectedSize:         1024,
+			expectedSnapshotSize: 8192,
 		},
 		{
 			name: "cbtService error falls back to full",
@@ -296,12 +311,13 @@ func TestSnapshotSource(t *testing.T) {
 			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
 				// Should be called with parentObject as empty because of fallback
 				blkup.On("Backup", mock.Anything, udmrepo.ID(""), mock.Anything, mock.Anything).
-					Return(udmrepo.Snapshot{}, int64(2048), nil)
+					Return(udmrepo.Snapshot{TotalSize: 1024}, int64(1024), nil)
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-cbt-fallback"), nil)
 				repo.On("Flush", mock.Anything).Return(nil)
 			},
-			expectedSnapID: "snap-cbt-fallback",
-			expectedSize:   2048,
+			expectedSnapID:       "snap-cbt-fallback",
+			expectedSize:         1024,
+			expectedSnapshotSize: 1024,
 		},
 	}
 
@@ -321,7 +337,7 @@ func TestSnapshotSource(t *testing.T) {
 				cbtSvc = tc.cbtService(t)
 			}
 
-			snapID, size, err := snapshotSource(
+			snapID, size, snapshotSize, err := snapshotSource(
 				ctx, mockRepo, mockBlkup,
 				baseSource,
 				true, "",
@@ -337,6 +353,7 @@ func TestSnapshotSource(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tc.expectedSnapID, snapID)
 				assert.Equal(t, tc.expectedSize, size)
+				assert.Equal(t, tc.expectedSnapshotSize, snapshotSize)
 			}
 
 			mockBlkup.AssertExpectations(t)

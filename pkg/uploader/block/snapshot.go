@@ -83,11 +83,12 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 		return uploader.SnapshotInfo{}, false, errors.Wrapf(err, "error reset pos of block device %s", source)
 	}
 
-	snapID, backupSize, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log, "Block Uploader")
+	snapID, backupSize, snapshotSize, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log, "Block Uploader")
 	snapshotInfo := uploader.SnapshotInfo{
 		ID:              snapID,
-		Size:            sourceInfo.size,
+		SnapshotSize:    snapshotSize,
 		IncrementalSize: backupSize,
+		SourceSize:      sourceInfo.size,
 	}
 
 	return snapshotInfo, false, err
@@ -106,7 +107,7 @@ func snapshotSource(
 	uploaderCfg map[string]string,
 	log logrus.FieldLogger,
 	description string,
-) (string, int64, error) {
+) (string, int64, int64, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
 
@@ -128,7 +129,7 @@ func snapshotSource(
 
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
+		return "", 0, 0, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
 	}
 
 	if snap.Tags == nil {
@@ -145,16 +146,16 @@ func snapshotSource(
 
 	snapID, err := rep.SaveSnapshot(ctx, snap)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to save snapshot %v", snap)
+		return "", 0, 0, errors.Wrapf(err, "Failed to save snapshot %v", snap)
 	}
 
 	if err = rep.Flush(ctx); err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to flush repository")
+		return "", 0, 0, errors.Wrapf(err, "Failed to flush repository")
 	}
 
 	log.Infof("Created snapshot with root %v and ID %v in %v", snap.RootObject, snapID, time.Since(snapshotStartTime).Truncate(time.Second))
 
-	return string(snapID), backupSize, nil
+	return string(snapID), backupSize, snap.TotalSize, nil
 }
 
 func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull bool, parentSnapshot string, volumeID string,

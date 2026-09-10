@@ -191,6 +191,9 @@ type BackupSnapshotDataMovementInfo struct {
 	// If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
 	ParentSnapshot string `json:"parentSnapshot,omitempty"`
 
+	// The size of source volume, for backup only
+	SourceSize int64 `json:"sourceSize,omitempty"`
+
 	// The DataUpload's Status.Phase value
 	Phase velerov2alpha1.DataUploadPhase `json:"phase"`
 }
@@ -277,6 +280,9 @@ type PodVolumeBackupInfo struct {
 	// the uploader reported no figure; a pointer to 0 means it transferred nothing.
 	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
 
+	// The size of source volume, for backup only
+	SourceSize int64 `json:"sourceSize,omitempty"`
+
 	// The type of the uploader that uploads the data. The valid values are `kopia` and `restic`.
 	UploaderType string `json:"uploaderType"`
 
@@ -339,6 +345,7 @@ func newPodVolumeInfoFromPVB(pvb *velerov1api.PodVolumeBackup) *PodVolumeBackupI
 		SnapshotHandle:  pvb.Status.SnapshotID,
 		Size:            pvb.Status.Progress.TotalBytes,
 		IncrementalSize: pvb.Status.IncrementalBytes,
+		SourceSize:      pvb.Status.SourceSize,
 		UploaderType:    pvb.Spec.UploaderType,
 		VolumeName:      pvb.Spec.Volume,
 		PodName:         pvb.Spec.Pod.Name,

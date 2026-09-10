@@ -121,13 +121,13 @@ func (kp *kopiaProvider) RunBackup(
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater,
-) (string, bool, int64, int64, error) {
+) (string, bool, int64, int64, int64, error) {
 	if updater == nil {
-		return "", false, 0, 0, errors.New("Need to initial backup progress updater first")
+		return "", false, 0, 0, 0, errors.New("Need to initial backup progress updater first")
 	}
 
 	if path == "" {
-		return "", false, 0, 0, errors.New("path is empty")
+		return "", false, 0, 0, 0, errors.New("path is empty")
 	}
 
 	log := kp.log.WithFields(logrus.Fields{
@@ -177,21 +177,21 @@ func (kp *kopiaProvider) RunBackup(
 
 		if kpUploader.IsCanceled() {
 			log.Warn("Kopia backup is canceled")
-			return snapshotID, false, 0, 0, ErrorCanceled
+			return snapshotID, false, 0, 0, 0, ErrorCanceled
 		}
-		return snapshotID, false, 0, 0, errors.Wrapf(err, "Failed to run kopia backup")
+		return snapshotID, false, 0, 0, 0, errors.Wrapf(err, "Failed to run kopia backup")
 	}
 
 	// which ensure that the statistic data of TotalBytes equal to BytesDone when finished
 	updater.UpdateProgress(
 		&uploader.Progress{
-			TotalBytes: snapshotInfo.Size,
-			BytesDone:  snapshotInfo.Size,
+			TotalBytes: snapshotInfo.SnapshotSize,
+			BytesDone:  snapshotInfo.SnapshotSize,
 		},
 	)
 
-	log.Debugf("Kopia backup finished, snapshot ID %s, backup size %d", snapshotInfo.ID, snapshotInfo.Size)
-	return snapshotInfo.ID, false, snapshotInfo.Size, progress.GetIncrementalSize(), nil
+	log.Debugf("Kopia backup finished, snapshot ID %s, backup size %d", snapshotInfo.ID, snapshotInfo.SnapshotSize)
+	return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, progress.GetIncrementalSize(), snapshotInfo.SourceSize, nil
 }
 
 func (kp *kopiaProvider) GetPassword(param any) (string, error) {

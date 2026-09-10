@@ -39,6 +39,7 @@ type BackupResult struct {
 	// while a current mover reporting a genuine zero still serializes the key and
 	// unmarshals to a non-nil zero, distinguishing "measured zero" from "not measured".
 	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+	SourceSize       int64  `json:"sourceSize,omitempty"`
 }
 
 // RestoreResult represents the result of a restore
