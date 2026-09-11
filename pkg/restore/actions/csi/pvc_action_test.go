@@ -528,7 +528,7 @@ func TestExecute(t *testing.T) {
 					ObjectMeta(builder.WithOwnerReference([]metav1.OwnerReference{{APIVersion: velerov1api.SchemeGroupVersion.String(), Kind: "Restore", Name: "testRestore", UID: "uid", Controller: boolptr.True()}}),
 						builder.WithLabelsMap(map[string]string{velerov1api.AsyncOperationIDLabel: "dd-uid.", velerov1api.RestoreNameLabel: "testRestore", velerov1api.RestoreUIDLabel: "uid"}),
 						builder.WithGenerateName("testRestore-")).Result()
-				d.Spec.RestoreType = "full"
+				d.Spec.RestoreType = "incremental"
 				d.Spec.DataMover = "velero-block"
 				return d
 			}(),

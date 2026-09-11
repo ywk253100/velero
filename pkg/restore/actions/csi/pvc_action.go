@@ -247,8 +247,7 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 			logger.Info("ExistingVolumeDataPolicy is in-place incremental restore and data mover is velero-block. Taking a CSI snapshot of the existing PVC as the baseline of CBT...")
 			volumeSnapshot, err = p.createVolumeSnapshot(ctx, logger, input.Restore, *existingPVC, dataUploadResult.SnapshotClass, backup.Spec.CSISnapshotTimeout.Duration)
 			if err != nil {
-				logger.Warnf("fail to create VolumeSnapshot for existing PVC %s/%s: %s, fallback to in-place full restore", existingPVC.Namespace, existingPVC.Name, err.Error())
-				restoreType = velerov1api.VolumeDataPolicyTypeFull
+				logger.Warnf("Fail to create VolumeSnapshot for existing PVC %s/%s: %s, incremental restore will be suppressed", existingPVC.Namespace, existingPVC.Name, err.Error())
 			} else {
 				defer func() {
 					if err != nil {
