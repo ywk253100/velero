@@ -205,4 +205,3 @@ func TestVgdpCounterConcurrentIsConstrained(t *testing.T) {
 	}
 	wg.Wait()
 }
-
