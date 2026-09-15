@@ -450,7 +450,7 @@ func TestExecute(t *testing.T) {
 			restore:     builder.ForRestore("velero", "testRestore").Backup("testBackup").Result(),
 			pvc:         builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
 			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").Result(),
-			expectedErr: "fail get DataUploadResult for restore: testRestore: no DataUpload result cm found with labels velero.io/pvc-namespace-name=velero.testPVC,velero.io/restore-uid=,velero.io/resource-usage=DataUpload",
+			expectedErr: "failed to get DataUploadResult for restore: testRestore: no DataUpload result cm found with labels velero.io/pvc-namespace-name=velero.testPVC,velero.io/restore-uid=,velero.io/resource-usage=DataUpload",
 		},
 		{
 			name:             "Restore from DataUploadResult",
@@ -757,6 +757,8 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 		name           string
 		pod            *corev1api.Pod
 		backedUpPVName string
+		sourceSize     string // carried on the PVC item by the restore engine
+		pvcCapacity    string
 		expectBlock    string
 	}{
 		{
@@ -774,6 +776,17 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			backedUpPVName: "backupPV",
 			expectBlock:    "was bound to PV backupPV at backup time",
 		},
+		{
+			// Backed-up PV unknown so the same-volume skip does not apply.
+			name:        "PVC smaller than the source volume blocks the restore",
+			sourceSize:  "209715200",
+			pvcCapacity: "100Mi",
+			expectBlock: "capacity 100Mi is smaller than the backed-up volume size 209715200 bytes",
+		},
+		{
+			name:        "source size not carried skips the capacity check",
+			pvcCapacity: "100Mi",
+		},
 	}
 
 	for _, tc := range tests {
@@ -781,6 +794,9 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			existingPVC := builder.ForPersistentVolumeClaim("velero", "testPVC").
 				VolumeName("testPV").
 				Phase(corev1api.ClaimBound).Result()
+			if tc.pvcCapacity != "" {
+				existingPVC.Status.Capacity = corev1api.ResourceList{corev1api.ResourceStorage: resource.MustParse(tc.pvcCapacity)}
+			}
 			existingPV := builder.ForPersistentVolume("testPV").Result()
 			backup := builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result()
 			restore := builder.ForRestore("velero", "testRestore").Backup("testBackup").
@@ -811,7 +827,11 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 				kubeClient: fake.NewSimpleClientset(kubeObjects...),
 			}
 
-			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup.DeepCopy())
+			item := pvcFromBackup.DeepCopy()
+			if tc.sourceSize != "" {
+				item.Annotations[velerov1api.InplaceRestoreSourceSizeAnnotation] = tc.sourceSize
+			}
+			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
 			require.NoError(t, err)
 			pvcFromBackupMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup)
 			require.NoError(t, err)
@@ -883,4 +903,23 @@ func TestNewPvcRestoreItemAction(t *testing.T) {
 	plugin1 := NewPvcRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
+}
+
+func TestDeleteExistingPVCFailure(t *testing.T) {
+	pvcRIA := pvcRestoreItemAction{
+		log:        logrus.New(),
+		crClient:   velerotest.NewFakeControllerRuntimeClient(t),
+		kubeClient: fake.NewSimpleClientset(),
+	}
+	existingPVC := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").
+		VolumeName("non-existent-pv").
+		Phase(corev1api.ClaimBound).Result()
+	targetPVC := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result()
+
+	returnedPV, err := pvcRIA.deleteExistingPVC(
+		t.Context(), logrus.New().WithField("test", "fail-to-get-pv"),
+		targetPVC, existingPVC, time.Minute)
+	require.Error(t, err)
+	assert.Nil(t, returnedPV)
+	assert.Contains(t, err.Error(), "failed to get PV non-existent-pv")
 }
