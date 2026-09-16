@@ -585,7 +585,24 @@ func TestExecute(t *testing.T) {
 			crObjects: []runtime.Object{
 				builder.ForPersistentVolumeClaim("restore", "testPVC").VolumeName("testPV").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
 			},
-			expectedErr: "ExistingVolumeDataPolicy is in-place incremental restore, data mover is velero-block and namespace-mapping is set, but the existing PVC restore/testPVC is not created from a VolumeSnapshot, fail the restore",
+			expectedErr: "the existing PVC restore/testPVC should be created from a VolumeSnapshot when triggering the in-place incremental restore with block data mover and namespace-mapping set, fail the restore",
+		},
+		{
+			name:             "PVC exists and in-place incremental restore set with namespace mapping, existing PVC is not bound",
+			backup:           builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result(),
+			restore:          builder.ForRestore("velero", "testRestore").Backup("testBackup").NamespaceMappings("velero", "restore").ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeIncremental)).ItemOperationTimeout(time.Minute * 10).ObjectMeta(builder.WithUID("uid")).Result(),
+			pvc:              builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
+			pv:               builder.ForPersistentVolume("testPV").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result(),
+			dataUploadResult: builder.ForConfigMap("velero", "testCM").Data("uid", "{\"DataMover\":\"velero-block\", \"SnapshotClass\":\"test-snapclass\"}").ObjectMeta(builder.WithLabels(velerov1api.RestoreUIDLabel, "uid", velerov1api.PVCNamespaceNameLabel, "velero.testPVC", velerov1api.ResourceUsageLabel, label.GetValidName(string(velerov1api.VeleroResourceUsageDataUploadResult)))).Result(),
+			kubeClientObj: []runtime.Object{
+				builder.ForPersistentVolumeClaim("restore", "testPVC").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).DataSource(&corev1api.TypedLocalObjectReference{APIGroup: ptr.To(snapshotv1api.SchemeGroupVersion.Group), Kind: "VolumeSnapshot", Name: "source-snap"}).Result(),
+				builder.ForPersistentVolume("testPV").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result(),
+			},
+			crObjects: []runtime.Object{
+				builder.ForPersistentVolumeClaim("restore", "testPVC").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).DataSource(&corev1api.TypedLocalObjectReference{APIGroup: ptr.To(snapshotv1api.SchemeGroupVersion.Group), Kind: "VolumeSnapshot", Name: "source-snap"}).Result(),
+				builder.ForVolumeSnapshot("restore", "source-snap").Result(),
+			},
+			expectedErr: "the existing PVC restore/testPVC should be bound before triggering the in-place incremental restore with block data mover and namespace-mapping set, fail the restore",
 		},
 		{
 			name:             "PVC exists and in-place incremental restore set with namespace mapping, VolumeSnapshot get fails",
@@ -1131,16 +1148,10 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 	wrongGroup := "other.group.io"
 	crossNS := "cross-ns"
 
-	boundPVC := builder.ForPersistentVolumeClaim("test-ns", "test-pvc").VolumeName("test-pv").Phase(corev1api.ClaimBound).Result()
-	boundPV := builder.ForPersistentVolume("test-pv").Result()
-
 	tests := []struct {
 		name              string
 		pvc               *corev1api.PersistentVolumeClaim
-		kubeObjects       []runtime.Object
 		crObjects         []runtime.Object
-		snapshotObjects   []runtime.Object
-		timeout           time.Duration
 		expectedFound     bool
 		expectedVSName    string
 		expectedVSNS      string
@@ -1259,25 +1270,6 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 			expectedFound: false,
 		},
 		{
-			name: "failed to wait for PVC to be bound within timeout",
-			pvc: &corev1api.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pvc",
-					Namespace: "test-ns",
-				},
-				Spec: corev1api.PersistentVolumeClaimSpec{
-					DataSource: &corev1api.TypedLocalObjectReference{
-						APIGroup: ptr.To(snapshotv1api.SchemeGroupVersion.Group),
-						Kind:     "VolumeSnapshot",
-						Name:     "some-vs",
-					},
-				},
-			},
-			timeout:           0,
-			expectedFound:     false,
-			expectedErrSubstr: "failed to wait for PVC test-ns/test-pvc to be bound within timeout",
-		},
-		{
 			name: "dataSource VolumeSnapshot not found in crClient",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1292,13 +1284,11 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 					},
 				},
 			},
-			kubeObjects:       []runtime.Object{boundPVC, boundPV},
-			timeout:           time.Minute,
 			expectedFound:     false,
 			expectedErrSubstr: "fail to get VolumeSnapshot test-ns/missing-vs",
 		},
 		{
-			name: "dataSource VolumeSnapshot is fully ready (same namespace)",
+			name: "dataSource VolumeSnapshot found (same namespace)",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pvc",
@@ -1312,17 +1302,15 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 					},
 				},
 			},
-			kubeObjects: []runtime.Object{boundPVC, boundPV},
 			crObjects: []runtime.Object{
 				builder.ForVolumeSnapshot("test-ns", "ready-vs").Result(),
 			},
-			timeout:        time.Minute,
 			expectedFound:  true,
 			expectedVSName: "ready-vs",
 			expectedVSNS:   "test-ns",
 		},
 		{
-			name: "dataSourceRef VolumeSnapshot is fully ready (cross namespace)",
+			name: "dataSourceRef VolumeSnapshot found (cross namespace)",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pvc",
@@ -1337,17 +1325,15 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 					},
 				},
 			},
-			kubeObjects: []runtime.Object{boundPVC, boundPV},
 			crObjects: []runtime.Object{
 				builder.ForVolumeSnapshot("cross-ns", "cross-vs").Result(),
 			},
-			timeout:        time.Minute,
 			expectedFound:  true,
 			expectedVSName: "cross-vs",
 			expectedVSNS:   "cross-ns",
 		},
 		{
-			name: "dataSourceRef VolumeSnapshot is fully ready (nil namespace falls back to pvc namespace)",
+			name: "dataSourceRef VolumeSnapshot found (nil namespace falls back to pvc namespace)",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pvc",
@@ -1362,11 +1348,9 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 					},
 				},
 			},
-			kubeObjects: []runtime.Object{boundPVC, boundPV},
 			crObjects: []runtime.Object{
 				builder.ForVolumeSnapshot("test-ns", "same-ns-vs").Result(),
 			},
-			timeout:        time.Minute,
 			expectedFound:  true,
 			expectedVSName: "same-ns-vs",
 			expectedVSNS:   "test-ns",
@@ -1377,13 +1361,11 @@ func TestIsCreatedFromSnapshot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := logrus.New()
 			p := &pvcRestoreItemAction{
-				log:               logger,
-				crClient:          velerotest.NewFakeControllerRuntimeClient(t, tc.crObjects...),
-				kubeClient:        fake.NewSimpleClientset(tc.kubeObjects...),
-				csiSnapshotClient: snapshotFake.NewSimpleClientset(tc.snapshotObjects...).SnapshotV1(),
+				log:      logger,
+				crClient: velerotest.NewFakeControllerRuntimeClient(t, tc.crObjects...),
 			}
 
-			vs, ok, err := p.isCreatedFromSnapshot(t.Context(), tc.pvc, tc.timeout)
+			vs, ok, err := p.isCreatedFromSnapshot(t.Context(), tc.pvc)
 
 			if tc.expectedErrSubstr != "" {
 				require.Error(t, err)
