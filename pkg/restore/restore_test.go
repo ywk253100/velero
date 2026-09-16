@@ -5299,6 +5299,33 @@ func TestRestoreInplaceSourceSizeCarrierAnnotation(t *testing.T) {
 		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreSourceSizeAnnotation)
 	})
 
+	t.Run("volume handle from volume info is carried to RIAs and stripped from the cluster object", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.PVCs())
+		var seen string
+		capture := &pluggableAction{
+			executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+				item := input.Item.(*unstructured.Unstructured)
+				seen = item.GetAnnotations()[velerov1api.InplaceRestoreVolumeHandleAnnotation]
+				return &velero.RestoreItemActionExecuteOutput{UpdatedItem: item}, nil
+			},
+		}
+
+		warnings, errs := h.restorer.Restore(
+			newRequest(t, h, map[string]volume.BackupVolumeInfo{
+				"pv-1": {PVCNamespace: "ns-1", PVCName: "pvc-1", PVInfo: &volume.PVInfo{VolumeHandle: "vol-1"}},
+			}),
+			[]riav2.RestoreItemAction{capture},
+			nil,
+		)
+		assertEmptyResults(t, warnings, errs)
+		assert.Equal(t, "vol-1", seen)
+
+		got, err := h.DynamicClient.Resource(test.PVCs().GVR()).Namespace("ns-1").Get(t.Context(), "pvc-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreVolumeHandleAnnotation)
+	})
+
 	t.Run("no carrier when the volume info has no source size", func(t *testing.T) {
 		h := newHarness(t)
 		h.AddItems(t, test.PVCs())

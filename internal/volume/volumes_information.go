@@ -384,6 +384,21 @@ type PVInfo struct {
 
 	// The PV's labels should be kept after recreation.
 	Labels map[string]string `json:"labels"`
+
+	// VolumeHandle is the CSI volume handle of the PV, identifying the underlying
+	// volume independently of the PV name. Empty for non-CSI volumes.
+	VolumeHandle string `json:"volumeHandle,omitempty"`
+}
+
+func newPVInfo(pv *corev1api.PersistentVolume) *PVInfo {
+	info := &PVInfo{
+		ReclaimPolicy: string(pv.Spec.PersistentVolumeReclaimPolicy),
+		Labels:        pv.Labels,
+	}
+	if pv.Spec.CSI != nil {
+		info.VolumeHandle = pv.Spec.CSI.VolumeHandle
+	}
+	return info
 }
 
 // BackupVolumesInformation contains the information needs by generating
@@ -460,10 +475,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForSkippedPV() {
 				SnapshotDataMoved: false,
 				Skipped:           true,
 				SkippedReason:     skippedReason,
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo:            newPVInfo(&pvcPVInfo.PV),
 			}
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
@@ -496,10 +508,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForVeleroNativeSnapshot() {
 				// although NativeSnapshot doesn't check whether the snapshot creation result.
 				Result:             volumeResult,
 				NativeSnapshotInfo: newNativeSnapshotInfo(nativeSnapshot),
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo:             newPVInfo(&pvcPVInfo.PV),
 			}
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
@@ -591,10 +600,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 					ReadyToUse:                volumeSnapshot.Status.ReadyToUse,
 					VolumeGroupSnapshotHandle: volumeGroupSnapshotHandle,
 				},
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo: newPVInfo(&pvcPVInfo.PV),
 			}
 
 			if volumeSnapshot.Status.CreationTime != nil {
@@ -648,10 +654,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromPVB() {
 				volumeInfo.PVCName = pvcPVInfo.PVCName
 				volumeInfo.PVCNamespace = pvcPVInfo.PVCNamespace
 				volumeInfo.PVName = pvcPVInfo.PV.Name
-				volumeInfo.PVInfo = &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				}
+				volumeInfo.PVInfo = newPVInfo(&pvcPVInfo.PV)
 			} else {
 				v.logger.Warnf("Cannot find info for PVC %s/%s", pvb.Spec.Pod.Namespace, pvcName)
 				continue
@@ -760,10 +763,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
 					Size:           dataUpload.Status.Progress.TotalBytes,
 					SnapshotHandle: dataUpload.Status.SnapshotID,
 				},
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo: newPVInfo(&pvcPVInfo.PV),
 			}
 
 			if dataUpload.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {

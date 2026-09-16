@@ -1685,3 +1685,13 @@ func TestNewPodVolumeInfoFromPVB(t *testing.T) {
 		})
 	}
 }
+
+func TestNewPVInfo(t *testing.T) {
+	csiPV := builder.ForPersistentVolume("pv-1").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).
+		ObjectMeta(builder.WithLabels("k", "v")).Result()
+	csiPV.Spec.CSI = &corev1api.CSIPersistentVolumeSource{Driver: "fake.csi", VolumeHandle: "vol-1"}
+	require.Equal(t, &PVInfo{ReclaimPolicy: "Retain", Labels: map[string]string{"k": "v"}, VolumeHandle: "vol-1"}, newPVInfo(csiPV))
+
+	localPV := builder.ForPersistentVolume("pv-2").ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result()
+	require.Equal(t, &PVInfo{ReclaimPolicy: "Delete"}, newPVInfo(localPV))
+}
