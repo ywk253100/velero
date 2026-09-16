@@ -235,6 +235,8 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	// If cross-namespace restore is configured, change the namespace
 	// for PVC object to be restored
 	newNamespace, namespaceMapped := input.Restore.Spec.NamespaceMapping[pvc.GetNamespace()]
+	// make sure the namespace mapping is not the same as the original namespace
+	namespaceMapped = namespaceMapped && newNamespace != pvc.Namespace
 	if !namespaceMapped {
 		// Use original namespace
 		newNamespace = pvc.Namespace
