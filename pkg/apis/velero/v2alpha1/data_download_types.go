@@ -162,7 +162,8 @@ type DataDownloadStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="DataDownload status such as New/InProgress"
 // The "Restore Type" column is hidden by default to align with DataUpload.
-// +kubebuilder:printcolumn:name="Restore Type",type="string",JSONPath=".spec.restoreType",description="Restore type such as Full/Incremental",priority=10
+// +kubebuilder:printcolumn:name="Requested Restore Type",type="string",JSONPath=".spec.restoreType",description="Requested restore type such as Full/Incremental",priority=10
+// +kubebuilder:printcolumn:name="Fallback Full",type="boolean",JSONPath=".status.fallbackFull",description="Whether the incremental restore has fallen back to full restore",priority=10
 // +kubebuilder:printcolumn:name="Started",type="date",JSONPath=".status.startTimestamp",description="Time duration since this DataDownload was started"
 // +kubebuilder:printcolumn:name="Bytes Done",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Completed bytes"
 // +kubebuilder:printcolumn:name="Total Bytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Total bytes"
